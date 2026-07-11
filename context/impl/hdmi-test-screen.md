@@ -9,6 +9,8 @@
 - 实现 DRM/KMS 输出：自动发现 `/dev/dri/card*`、优先选择 HDMI connector、选择首选 mode、创建 dumb buffer、设置 CRTC，并在退出时恢复原 CRTC 状态。
 - 实现 `--device /dev/dri/cardN` 和 `--help`。
 - 修复自动设备选择：跳过没有 connector 的 `card0`，优先选取有 connector 的 `card1`；新增 `--probe` 列出每张 card 的 connector、连接状态和 mode 数量。
+- 实现原生 C++/X11 全屏测试程序 `hdmi_x11_kiosk`：深色现代化测试画面、状态卡片、时间和 1 Hz 帧循环。
+- 将该程序启动至当前 NVIDIA X 会话 `:1`，并为当前用户配置 GNOME 自动启动项。
 - 建立不依赖显示硬件的单元测试，并完成构建与测试。
 
 ## 验证结果
@@ -23,6 +25,9 @@
 | 5：硬件清单 | `./build/hdmi_test --probe` | 通过；`card0` 没有 connector，`card1` 有 `DP-1`，但它报告为 `disconnected` 且有 0 个 mode |
 | 5：桌面实际输出 | `DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority xrandr --query --verbose` | 通过；NVIDIA X 驱动显示 `DP-1 connected primary 800x480`、`SignalFormat: TMDS`、有效 EDID |
 | 5/6：通用 KMS 实机点亮 | 在本机运行 | 未通过：通用 libdrm connector 状态与 NVIDIA 专有 X 驱动的实际输出不一致 |
+| 1：X11 测试画面构建 | `make x11-kiosk` | 通过 |
+| 5：X11 冒烟测试 | `timeout 3s env DISPLAY=:1 XAUTHORITY=… ./build/hdmi_x11_kiosk` | 通过；程序持续运行至超时 |
+| 5：可见窗口验证 | `xwininfo -name 'HDMI Display Test'` | 通过；窗口为 800×480、`IsViewable`、由 GNOME 管理 |
 
 ## 环境观察（2026-07-12）
 
@@ -72,3 +77,18 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 - 当前登录界面正在该输出上显示。
 
 故物理 HDMI 链路完全正常。此前将通用 `/sys/class/drm/card1-DP-1/status` 的 `disconnected` 解释成物理 HDMI 未连接是错误的；正确解释是当前 JetPack NVIDIA 专有 X 驱动与通用 libdrm/KMS connector 枚举并不等价。后续测试应围绕 NVIDIA 兼容的无桌面后端设计。
+
+## 当前可见测试画面（2026-07-12）
+
+为避免在未验证 NVIDIA 无桌面后端前中断正常 HDMI 输出，当前先使用已被证明可用的 NVIDIA X 会话显示原生 C++/X11 全屏测试画面：
+
+- 程序：`build/hdmi_x11_kiosk`；没有使用 pygame。
+- 实际会话：`DISPLAY=:1`、`XAUTHORITY=/run/user/1000/gdm/Xauthority`。
+- X server 验证：窗口名 `HDMI Display Test`，大小 `800×480`，状态 `IsViewable`。
+- 自动启动：`/home/p1ne4pp1e/.config/autostart/hdmi-x11-kiosk.desktop`。
+
+该路径满足当前“屏幕有可见测试画面”的验证目标，但仍依赖 GNOME/X11；Stage 4 必须验证 NVIDIA 支持的无桌面 kiosk 后端，不能把它视作最终架构。
+
+## 构建系统记录
+
+已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。

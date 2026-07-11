@@ -39,6 +39,27 @@ make
 
 显示测试画面后按 `Ctrl-C` 退出。程序会尝试恢复启动前的显示状态。
 
+## 当前 Jetson 的可见测试画面
+
+当前 JetPack 的 HDMI 输出由 NVIDIA 专有 X 驱动正常管理。`hdmi_x11_kiosk` 是一个原生 C++/X11 全屏测试画面，用于先验证画面设计、帧循环和实际 HDMI 输出；它不是最终无桌面后端。
+
+```bash
+make x11-kiosk
+DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority ./build/hdmi_x11_kiosk
+```
+
+当前用户的 GNOME 自动启动项位于 `~/.config/autostart/hdmi-x11-kiosk.desktop`，重新登录后会自动启动该测试画面。
+
+## CMake
+
+项目已提供 `CMakeLists.txt`。安装系统 `cmake` 后可使用：
+
+```bash
+cmake -S . -B build-cmake
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
 ## 当前硬件阻塞
 
 当前 JetPack 的 NVIDIA 专有 X 驱动实际通过 `DP-1` 以 TMDS 信号驱动已连接的 HDMI 屏幕（800×480）；但通用 `libdrm` 枚举到的 `card1-DP-1` 同时报告为 `disconnected`。因此通用 KMS 原型尚不能直接点亮该屏幕，不能把它作为最终后端。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
