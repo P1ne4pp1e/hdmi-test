@@ -47,3 +47,14 @@ make
 ```
 
 预期 HDMI 显示深色测试画面；按 `Ctrl-C` 后程序退出并尝试恢复此前显示状态。
+
+## 后续排查：已排除空闲休眠（2026-07-12）
+
+用户已手动唤醒显示器，但状态仍为 `disconnected`。当前检查结果：
+
+- `card1-DP-1/status` 仍为 `disconnected`；`enabled` 为 `disabled`，`modes` 为空。
+- 没有发现与 HDMI、DP、EDID 或热插拔相关的内核报错。
+- 当前内核只暴露 `DP-1` 这个显示 connector；若实际使用 HDMI 显示器，DP→HDMI 的线缆/转接器及其方向性、兼容性是首要检查对象。
+- `gdm.service` 当前运行。它不是 connector 断开的原因；但显示器被检测到后，直接 KMS 测试程序可能需要在停止图形登录管理器后运行，以获取 DRM master。
+
+因此当前首要动作不是修改渲染代码，而是让 `card1-DP-1/status` 变成 `connected`。在此之前，任何 Qt、DMA-BUF 或 KMS 画面都没有可提交的显示模式。
