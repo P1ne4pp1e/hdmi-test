@@ -14,7 +14,7 @@
 **Goal**: 经当前 NVIDIA X 显示栈在已验证的 HDMI 屏上显示 C++ 全屏测试画面。
 **Success Criteria**: 原生 X11 测试程序在 `:1` 的 800×480 屏幕上全屏显示；可由服务模板在图形会话后启动。
 **Tests**: `make x11-kiosk`、`xwininfo -root -tree`、人工核对 HDMI 屏。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: 无桌面 NVIDIA 后端验证
 **Goal**: 选择并验证 JetPack NVIDIA 支持的 kiosk/直接输出后端，替代临时 X11 测试路径。

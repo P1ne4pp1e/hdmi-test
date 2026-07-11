@@ -50,6 +50,12 @@ DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority ./build/hdmi_x11_kiosk
 
 当前用户的 GNOME 自动启动项位于 `~/.config/autostart/hdmi-x11-kiosk.desktop`，重新登录后会自动启动该测试画面。
 
+此外，当前已启用用户级 `systemd` 服务 `hdmi-x11-kiosk.service`，它会在程序异常退出后自动重启。检查其状态：
+
+```bash
+systemctl --user status hdmi-x11-kiosk.service
+```
+
 ## CMake
 
 项目已提供 `CMakeLists.txt`。安装系统 `cmake` 后可使用：

@@ -1,0 +1,15 @@
+[Unit]
+Description=HDMI X11 kiosk test screen
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:1
+Environment=XAUTHORITY=/run/user/1000/gdm/Xauthority
+WorkingDirectory=/home/p1ne4pp1e/screen_test
+ExecStart=/home/p1ne4pp1e/screen_test/build/hdmi_x11_kiosk
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

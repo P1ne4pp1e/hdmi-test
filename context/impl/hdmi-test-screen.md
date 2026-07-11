@@ -86,6 +86,7 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 - 实际会话：`DISPLAY=:1`、`XAUTHORITY=/run/user/1000/gdm/Xauthority`。
 - X server 验证：窗口名 `HDMI Display Test`，大小 `800×480`，状态 `IsViewable`。
 - 自动启动：`/home/p1ne4pp1e/.config/autostart/hdmi-x11-kiosk.desktop`。
+- 常驻服务：`/home/p1ne4pp1e/.config/systemd/user/hdmi-x11-kiosk.service` 已启用且处于 `active (running)`；它将测试程序置于 systemd 用户服务 cgroup 中，并设为异常自动重启。
 
 该路径满足当前“屏幕有可见测试画面”的验证目标，但仍依赖 GNOME/X11；Stage 4 必须验证 NVIDIA 支持的无桌面 kiosk 后端，不能把它视作最终架构。
 
