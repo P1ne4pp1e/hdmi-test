@@ -40,4 +40,4 @@ make
 
 ## 当前硬件阻塞
 
-当前开发环境尚未出现 `/dev/dri/card*`，因此已验证构建、图案绘制和缺失设备诊断，但还不能完成 HDMI 实机点亮。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
+当前主机存在 DRM 设备节点，但内核将唯一可见的 `card1-DP-1` connector 报告为 `disconnected`，因此还不能完成 HDMI 实机点亮。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
