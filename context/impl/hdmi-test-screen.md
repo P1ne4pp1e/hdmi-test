@@ -31,7 +31,7 @@
 - 当前完整主机环境存在 `/dev/dri/card0`、`/dev/dri/card1` 和对应的 `/dev/char/226:*` 设备节点；当前用户属于 `video` 组，可打开 `card1`。
 - 先前“设备节点不存在”的结果来自受限执行环境没有暴露 `/dev/dri`，不是主机的真实硬件故障。
 - 当前唯一可见 connector 是 `card1-DP-1`，其 `status` 为 `disconnected`，没有可用 mode。这是当前 HDMI 实机验证的真实阻塞。
-- 主板型号：`NVIDIA Jetson Orin Nano Developer Kit`。根据 DRM 的实际枚举，正确显示设备是 `/dev/dri/card1`，正确 connector 是 `DP-1`；`card0` 不是外部显示输出设备。
+- 主板型号：`NVIDIA Jetson Orin Nano Developer Kit`；系统为 JetPack 6.2.2 对应的 L4T `R36.5.0`。根据 DRM 的实际枚举，正确显示设备是 `/dev/dri/card1`，当前唯一 connector 被驱动命名为 `DP-1`；`card0` 不是外部显示输出设备。
 - Qt 与 CMake 当前未安装；本阶段刻意不依赖它们。
 
 ## 外部阻塞与下一步
@@ -57,7 +57,7 @@ make
 
 - `card1-DP-1/status` 仍为 `disconnected`；`enabled` 为 `disabled`，`modes` 为空。
 - 没有发现与 HDMI、DP、EDID 或热插拔相关的内核报错。
-- 当前内核只暴露 `DP-1` 这个显示 connector；若实际使用 HDMI 显示器，DP→HDMI 的线缆/转接器及其方向性、兼容性是首要检查对象。
+- 当前内核只暴露 `DP-1` 这个显示 connector。用户确认使用官方载板的原生 HDMI 口，因此不能将其直接归因于 DP→HDMI 转接；应排查 HDMI 热插拔、EDID 读取或 JetPack 显示配置为何未将原生 HDMI 正确暴露给 DRM。
 - `gdm.service` 当前运行。它不是 connector 断开的原因；但显示器被检测到后，直接 KMS 测试程序可能需要在停止图形登录管理器后运行，以获取 DRM master。
 
 因此当前首要动作不是修改渲染代码，而是让 `card1-DP-1/status` 变成 `connected`。在此之前，任何 Qt、DMA-BUF 或 KMS 画面都没有可提交的显示模式。
