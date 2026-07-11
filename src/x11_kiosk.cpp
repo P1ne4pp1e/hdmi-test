@@ -7,8 +7,10 @@
 #include <ctime>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
+#include <unistd.h>
 
 namespace {
 
@@ -22,27 +24,29 @@ unsigned long rgb(unsigned char red, unsigned char green, unsigned char blue) {
          static_cast<unsigned long>(blue);
 }
 
-void draw(Display* display, Window window, GC graphics, int width, int height) {
+void draw(Display* display, Drawable target, GC graphics, int width, int height,
+          std::uint64_t frame_number, double frames_per_second,
+          std::chrono::seconds uptime) {
   XSetForeground(display, graphics, rgb(11, 18, 32));
-  XFillRectangle(display, window, graphics, 0, 0, static_cast<unsigned>(width),
+  XFillRectangle(display, target, graphics, 0, 0, static_cast<unsigned>(width),
                  static_cast<unsigned>(height));
 
   const int header_height = height / 6;
   XSetForeground(display, graphics, rgb(20, 32, 52));
-  XFillRectangle(display, window, graphics, 0, 0, static_cast<unsigned>(width),
+  XFillRectangle(display, target, graphics, 0, 0, static_cast<unsigned>(width),
                  static_cast<unsigned>(header_height));
 
   XSetForeground(display, graphics, rgb(224, 231, 255));
-  XDrawString(display, window, graphics, 32, header_height / 2 + 6,
+  XDrawString(display, target, graphics, 32, header_height / 2 + 6,
               "HDMI DISPLAY TEST", 17);
 
   XSetForeground(display, graphics, rgb(31, 47, 72));
   for (int x = 0; x < width; x += 80) {
-    XFillRectangle(display, window, graphics, x, header_height, 1,
+    XFillRectangle(display, target, graphics, x, header_height, 1,
                    static_cast<unsigned>(height - header_height));
   }
   for (int y = header_height; y < height; y += 80) {
-    XFillRectangle(display, window, graphics, 0, y, static_cast<unsigned>(width), 1);
+    XFillRectangle(display, target, graphics, 0, y, static_cast<unsigned>(width), 1);
   }
 
   const int card_top = header_height + 64;
@@ -50,16 +54,22 @@ void draw(Display* display, Window window, GC graphics, int width, int height) {
   const int card_width = (width - 160) / 3;
   const unsigned long colors[] = {rgb(30, 200, 150), rgb(239, 83, 80),
                                   rgb(255, 183, 77)};
-  const char* labels[] = {"DISPLAY LINK", "FRAME LOOP", "INPUT READY"};
+  const char* labels[] = {"DISPLAY LINK", "FRAME RATE", "FRAME COUNT"};
+  char values[3][48]{};
+  std::snprintf(values[0], sizeof(values[0]), "X11 / TMDS");
+  std::snprintf(values[1], sizeof(values[1]), "%.1f FPS", frames_per_second);
+  std::snprintf(values[2], sizeof(values[2]), "%llu", static_cast<unsigned long long>(frame_number));
   for (int index = 0; index < 3; ++index) {
     const int left = 40 + index * (card_width + 40);
     XSetForeground(display, graphics, colors[index]);
-    XFillRectangle(display, window, graphics, left, card_top,
+    XFillRectangle(display, target, graphics, left, card_top,
                    static_cast<unsigned>(card_width),
                    static_cast<unsigned>(card_height));
     XSetForeground(display, graphics, rgb(11, 18, 32));
-    XDrawString(display, window, graphics, left + 18, card_top + 32,
+    XDrawString(display, target, graphics, left + 18, card_top + 32,
                 labels[index], static_cast<int>(std::strlen(labels[index])));
+    XDrawString(display, target, graphics, left + 18, card_top + 58,
+                values[index], static_cast<int>(std::strlen(values[index])));
   }
 
   const auto now = std::chrono::system_clock::now();
@@ -70,9 +80,18 @@ void draw(Display* display, Window window, GC graphics, int width, int height) {
   std::strftime(time_label, sizeof(time_label), "RUNNING  %Y-%m-%d  %H:%M:%S",
                 &local_time);
   XSetForeground(display, graphics, rgb(224, 231, 255));
-  XDrawString(display, window, graphics, 32, height - 32, time_label,
+  XDrawString(display, target, graphics, 32, height - 54, time_label,
               static_cast<int>(std::strlen(time_label)));
-  XFlush(display);
+  char debug_label[160]{};
+  char host_name[64]{};
+  gethostname(host_name, sizeof(host_name) - 1);
+  const char* display_name = std::getenv("DISPLAY");
+  std::snprintf(debug_label, sizeof(debug_label),
+                "HOST %s | DISPLAY %s | %dx%d | DOUBLE BUFFER | UPTIME %llds",
+                host_name, display_name == nullptr ? "unknown" : display_name, width,
+                height, static_cast<long long>(uptime.count()));
+  XDrawString(display, target, graphics, 32, height - 28, debug_label,
+              static_cast<int>(std::strlen(debug_label)));
 }
 
 }  // namespace
@@ -81,8 +100,7 @@ int main(int argc, char* argv[]) {
   if (argc > 1 && (std::strcmp(argv[1], "--help") == 0 ||
                    std::strcmp(argv[1], "-h") == 0)) {
     std::cout << "Usage: hdmi_x11_kiosk\n"
-                 "Starts a fullscreen C++ test screen on the active X display. "
-                 "Press Escape to exit.\n";
+                 "Starts a fullscreen C++ test screen on the active X display.\n";
     return 0;
   }
 
@@ -117,18 +135,53 @@ int main(int argc, char* argv[]) {
              &fullscreen_event);
   XRaiseWindow(display, window);
   const GC graphics = XCreateGC(display, window, 0, nullptr);
+  const Pixmap back_buffer = XCreatePixmap(display, window, static_cast<unsigned>(width),
+                                           static_cast<unsigned>(height),
+                                           static_cast<unsigned>(DefaultDepth(display, screen)));
+  if (back_buffer == 0) {
+    std::cerr << "Cannot create X11 back buffer.\n";
+    XFreeGC(display, graphics);
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+    return 1;
+  }
 
   std::signal(SIGINT, handle_signal);
   std::signal(SIGTERM, handle_signal);
+  const auto start_time = std::chrono::steady_clock::now();
+  auto sample_start = start_time;
+  auto next_frame = start_time;
+  std::uint64_t frame_number = 0;
+  std::uint64_t sampled_frames = 0;
+  double frames_per_second = 0.0;
   while (keep_running) {
     while (XPending(display) > 0) {
       XEvent event{};
       XNextEvent(display, &event);
     }
-    draw(display, window, graphics, width, height);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    const auto now = std::chrono::steady_clock::now();
+    const auto sample_elapsed = now - sample_start;
+    if (sample_elapsed >= std::chrono::seconds(1)) {
+      frames_per_second = static_cast<double>(sampled_frames) /
+                          std::chrono::duration<double>(sample_elapsed).count();
+      sample_start = now;
+      sampled_frames = 0;
+    }
+    draw(display, back_buffer, graphics, width, height, frame_number, frames_per_second,
+         std::chrono::duration_cast<std::chrono::seconds>(now - start_time));
+    XCopyArea(display, back_buffer, window, graphics, 0, 0, static_cast<unsigned>(width),
+              static_cast<unsigned>(height), 0, 0);
+    XFlush(display);
+    ++frame_number;
+    ++sampled_frames;
+    next_frame += std::chrono::milliseconds(33);
+    if (next_frame < now) {
+      next_frame = now;
+    }
+    std::this_thread::sleep_until(next_frame);
   }
 
+  XFreePixmap(display, back_buffer);
   XFreeGC(display, graphics);
   XDestroyWindow(display, window);
   XCloseDisplay(display);

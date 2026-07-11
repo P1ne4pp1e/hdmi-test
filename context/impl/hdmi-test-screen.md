@@ -90,6 +90,14 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 该路径满足当前“屏幕有可见测试画面”的验证目标，但仍依赖 GNOME/X11；Stage 4 必须验证 NVIDIA 支持的无桌面 kiosk 后端，不能把它视作最终架构。
 
+## 画面稳定性与调试信息（进行中）
+
+用户观察到测试画面每 0.5–2 秒闪烁。根因是原型直接在可见 X11 window 上清空并重绘完整画面；它不是 GNOME 或桌面服务争抢显示设备。现已使用离屏 Pixmap 双缓冲：先完整绘制到内存 Pixmap，再以一次 `XCopyArea` 提交到可见 window；循环目标为约 30 FPS。
+
+当前画面显示：实时 FPS、帧序号、800×480 分辨率、X11/TMDS 后端、主机名、DISPLAY、运行时间和实时时钟。
+
+`Win+L` 仍能锁屏是当前 X11 原型的预期限制：它由 GNOME 管理，未独占系统显示控制权。系统级切换必须停止 GDM/Xorg 并启动 NVIDIA 兼容的 kiosk compositor；当前用户没有免密 sudo，`sudo -n true` 返回“password is required”，因此该系统级切换尚无法由非交互进程执行。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。

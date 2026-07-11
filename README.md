@@ -56,6 +56,8 @@ DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority ./build/hdmi_x11_kiosk
 systemctl --user status hdmi-x11-kiosk.service
 ```
 
+测试画面使用离屏 Pixmap 双缓冲，并显示 FPS、帧序号、分辨率、显示后端、主机名和运行时间。它是 GNOME 上的过渡验证方案；按 `Win+L` 仍会由 GNOME 锁屏。
+
 ## CMake
 
 项目已提供 `CMakeLists.txt`。安装系统 `cmake` 后可使用：
