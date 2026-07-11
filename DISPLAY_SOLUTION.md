@@ -24,6 +24,12 @@ systemd → Qt 6 Quick（C++ 后端）→ EGLFS/DRM-KMS → HDMI
 
 需要逐帧显示的画面作为 Qt Quick 页面中的动态渲染区域；仅在该画面来自支持 DMA-BUF 的设备或硬件模块时，再接入零拷贝 DMA-BUF 路径。
 
+### 当前 Jetson 平台验证结果
+
+目标设备为 Jetson Orin Nano Developer Kit，JetPack 6.2.2（L4T R36.5）。当前 HDMI 屏幕在 NVIDIA 专有 X 驱动中已正常工作：X RandR 显示 `DP-1 connected primary 800x480`，`SignalFormat: TMDS`，并读到了 LONTIUM EDID。这里的 `DP-1` 是 NVIDIA 驱动对输出端的命名，TMDS 表明其当前使用 HDMI 信号链路。
+
+但是通用 `libdrm` 对 `/dev/dri/card1` 的 connector 枚举同时得到 `DP-1: disconnected, 0 mode(s)`。因此，通用 DRM dumb-buffer 程序无法直接替代当前 NVIDIA 显示栈；这不是线缆、显示器休眠或权限问题。后续必须验证与 JetPack NVIDIA 驱动兼容的无桌面后端（例如 NVIDIA 支持的 Wayland/Weston kiosk 路径或对应 EGL 输出路径），不能假定标准 KMS connector 可用。
+
 ## 3. 显示链路职责
 
 | 层级 | 职责 | 本项目选择 |

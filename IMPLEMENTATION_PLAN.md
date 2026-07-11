@@ -5,10 +5,10 @@
 **Status**: Complete
 
 ## Stage 2: 直接 KMS 测试画面
-**Goal**: 构建不依赖桌面环境的 C++ libdrm 程序，直接向 HDMI 输出测试画面。
-**Success Criteria**: 程序选择已连接显示器、设置首选模式、绘制画面并在退出时恢复原显示状态。
+**Goal**: 验证在 Jetson 当前显示驱动栈中可用的无桌面直出路径，并输出测试画面。
+**Success Criteria**: 选定的后端能使用当前 HDMI 输出、设置目标模式并显示画面；退出时恢复或由显示服务接管状态。
 **Tests**: 单元测试验证画面布局与像素格式；在目标设备执行人工 HDMI 冒烟测试。
-**Status**: Complete
+**Status**: In Progress
 
 ## Stage 3: 验证入口与交接
 **Goal**: 提供可重复的构建、运行、诊断和验证说明。

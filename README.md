@@ -4,7 +4,7 @@
 
 ## 当前测试程序
 
-`hdmi_test` 不依赖 X11、Wayland、Qt、SDL 或普通应用窗口。它使用 `libdrm`：
+`hdmi_test` 是第一个通用 `libdrm`/KMS 探测与测试图原型，不依赖 X11、Wayland、Qt、SDL 或普通应用窗口。它会：
 
 1. 自动发现 `/dev/dri/card*`；
 2. 优先选择已连接的 HDMI 输出与首选分辨率；
@@ -41,4 +41,4 @@ make
 
 ## 当前硬件阻塞
 
-本机的自动选择会跳过没有 connector 的 `card0`，选择直接显示设备 `card1`。当前主机将唯一可见的 `card1-DP-1` connector 报告为 `disconnected`，因此还不能完成实机点亮。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
+当前 JetPack 的 NVIDIA 专有 X 驱动实际通过 `DP-1` 以 TMDS 信号驱动已连接的 HDMI 屏幕（800×480）；但通用 `libdrm` 枚举到的 `card1-DP-1` 同时报告为 `disconnected`。因此通用 KMS 原型尚不能直接点亮该屏幕，不能把它作为最终后端。详情见 [实施记录](context/impl/hdmi-test-screen.md)。

@@ -19,9 +19,10 @@
 | 2：单元测试 | `make test` | 通过 |
 | 5：帮助页 | `./build/hdmi_test --help` | 通过 |
 | 5：无设备诊断 | 受限执行环境中运行 `./build/hdmi_test` | 通过；返回 1 并明确提示 `/dev/dri/card*` |
-| 5：当前设备诊断 | `./build/hdmi_test --device /dev/dri/card1` | 返回 1：没有已连接且有显示模式的 connector |
-| 5：硬件清单 | `./build/hdmi_test --probe` | 通过；`card0` 没有 connector，`card1` 有 `DP-1`，但它是 `disconnected` 且有 0 个 mode |
-| 5/6：实际 HDMI 点亮 | 在本机运行 | 阻塞：`card1-DP-1` 状态为 `disconnected`，没有可用 mode |
+| 5：当前设备诊断 | `./build/hdmi_test --device /dev/dri/card1` | 返回 1：通用 DRM connector 中没有已连接且有显示模式的输出 |
+| 5：硬件清单 | `./build/hdmi_test --probe` | 通过；`card0` 没有 connector，`card1` 有 `DP-1`，但它报告为 `disconnected` 且有 0 个 mode |
+| 5：桌面实际输出 | `DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority xrandr --query --verbose` | 通过；NVIDIA X 驱动显示 `DP-1 connected primary 800x480`、`SignalFormat: TMDS`、有效 EDID |
+| 5/6：通用 KMS 实机点亮 | 在本机运行 | 未通过：通用 libdrm connector 状态与 NVIDIA 专有 X 驱动的实际输出不一致 |
 
 ## 环境观察（2026-07-12）
 
@@ -30,13 +31,13 @@
 - 内核 sysfs 已注册 DRM `card0`（`226:0`）与 `card1`（`226:1`），并加载了 `tegra_drm` 与 `nvidia_drm`。
 - 当前完整主机环境存在 `/dev/dri/card0`、`/dev/dri/card1` 和对应的 `/dev/char/226:*` 设备节点；当前用户属于 `video` 组，可打开 `card1`。
 - 先前“设备节点不存在”的结果来自受限执行环境没有暴露 `/dev/dri`，不是主机的真实硬件故障。
-- 当前唯一可见 connector 是 `card1-DP-1`，其 `status` 为 `disconnected`，没有可用 mode。这是当前 HDMI 实机验证的真实阻塞。
+- 通用 libdrm 中唯一可见 connector 是 `card1-DP-1`，其 `status` 为 `disconnected`，没有可用 mode；但这不是当前 HDMI 的真实连接状态，见下方“显示栈结论”。
 - 主板型号：`NVIDIA Jetson Orin Nano Developer Kit`；系统为 JetPack 6.2.2 对应的 L4T `R36.5.0`。根据 DRM 的实际枚举，正确显示设备是 `/dev/dri/card1`，当前唯一 connector 被驱动命名为 `DP-1`；`card0` 不是外部显示输出设备。
 - Qt 与 CMake 当前未安装；本阶段刻意不依赖它们。
 
 ## 外部阻塞与下一步
 
-程序代码已可构建，DRM 设备节点也已可用；但显示驱动尚未检测到已连接显示器。必须先让显示器在 connector 状态中显示为 `connected`，才能执行 HDMI 实机冒烟验证。优先检查显示器输入源、线缆与转接器、实际物理输出接口，以及 Jetson 显示输出配置；完成后运行：
+程序代码已可构建，DRM 设备节点也已可用；但当前 NVIDIA 专有显示栈不向通用 libdrm 路径暴露实际已连接的 HDMI 输出。通用 KMS 原型不能继续作为点亮 HDMI 的实现后端。下一步应验证 NVIDIA 支持的无桌面显示后端；在该决策前保留现有程序作为 DRM 环境探测工具。
 
 ```bash
 make
@@ -49,15 +50,25 @@ make
 ./build/hdmi_test --device /dev/dri/card0
 ```
 
-预期 HDMI 显示深色测试画面；按 `Ctrl-C` 后程序退出并尝试恢复此前显示状态。
+在通用 KMS connector 与实际输出状态一致的平台上，预期 HDMI 显示深色测试画面；按 `Ctrl-C` 后程序退出并尝试恢复此前显示状态。
 
 ## 后续排查：已排除空闲休眠（2026-07-12）
 
-用户已手动唤醒显示器，但状态仍为 `disconnected`。当前检查结果：
+用户已手动唤醒显示器，但通用 DRM sysfs 状态仍为 `disconnected`。进一步检查后该状态已被证明不代表当前桌面输出。
 
 - `card1-DP-1/status` 仍为 `disconnected`；`enabled` 为 `disabled`，`modes` 为空。
 - 没有发现与 HDMI、DP、EDID 或热插拔相关的内核报错。
-- 当前内核只暴露 `DP-1` 这个显示 connector。用户确认使用官方载板的原生 HDMI 口，因此不能将其直接归因于 DP→HDMI 转接；应排查 HDMI 热插拔、EDID 读取或 JetPack 显示配置为何未将原生 HDMI 正确暴露给 DRM。
-- `gdm.service` 当前运行。它不是 connector 断开的原因；但显示器被检测到后，直接 KMS 测试程序可能需要在停止图形登录管理器后运行，以获取 DRM master。
+- 当前内核只向通用 libdrm 暴露 `DP-1` connector。用户确认使用官方载板的原生 HDMI 口，且 X RandR 已证实 TMDS 信号与 EDID 均正常。
+- `gdm.service` 当前运行。停止它不会修复通用 libdrm connector 与 NVIDIA 专有 X 驱动之间的状态差异；当前不应仅为重试此原型而停止桌面。
 
-因此当前首要动作不是修改渲染代码，而是让 `card1-DP-1/status` 变成 `connected`。在此之前，任何 Qt、DMA-BUF 或 KMS 画面都没有可提交的显示模式。
+因此当前首要动作不是修改线缆或停止桌面，而是选择并验证与 NVIDIA JetPack 显示驱动兼容的无桌面后端。
+
+## 显示栈结论（2026-07-12）
+
+Xorg 日志和当前 X RandR 查询给出决定性证据：
+
+- NVIDIA 专有 X 驱动识别 `LTM LONTIUM (DFP-1)` 为 `connected`，接口为 `Internal TMDS`。
+- 当前活动输出名为 `DP-1`，分辨率为 `800x480@59.97Hz`，具有有效 EDID；`SignalFormat` 是 `TMDS`。
+- 当前登录界面正在该输出上显示。
+
+故物理 HDMI 链路完全正常。此前将通用 `/sys/class/drm/card1-DP-1/status` 的 `disconnected` 解释成物理 HDMI 未连接是错误的；正确解释是当前 JetPack NVIDIA 专有 X 驱动与通用 libdrm/KMS connector 枚举并不等价。后续测试应围绕 NVIDIA 兼容的无桌面后端设计。
