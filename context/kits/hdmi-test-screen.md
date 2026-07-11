@@ -8,12 +8,13 @@
 
 ### R1：明确的运行时诊断
 
-程序必须自动寻找 DRM card 设备；找不到时必须说明未找到 `/dev/dri/card*`，并以非零状态退出。
+程序必须自动寻找具有显示 connector 的 DRM card；找不到时必须说明未找到 `/dev/dri/card*`，并以非零状态退出。程序还必须能列出 card 与 connector 状态，辅助硬件诊断。
 
 **验收标准**
 
 - [ ] 在没有 DRM card 的机器运行程序时，错误输出包含 `/dev/dri/card*`。**Gate 5**
 - [ ] 程序返回非零退出码。**Gate 5**
+- [ ] `--probe` 列出每个 DRM card 的 connector、连接状态和 mode 数量。**Gate 5**
 
 ### R2：直接 KMS 输出
 

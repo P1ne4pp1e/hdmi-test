@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -91,13 +92,80 @@ drmModeModeInfo find_mode(const drmModeConnector* connector) {
 }  // namespace
 
 std::string find_drm_device() {
+  std::string fallback;
   for (int index = 0; index < 16; ++index) {
     const std::string path = "/dev/dri/card" + std::to_string(index);
-    if (std::filesystem::exists(path)) {
+    if (!std::filesystem::exists(path)) {
+      continue;
+    }
+    if (fallback.empty()) {
+      fallback = path;
+    }
+    const int fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+      continue;
+    }
+    drmModeRes* resources = drmModeGetResources(fd);
+    const bool has_connector =
+        resources != nullptr && resources->count_connectors > 0;
+    if (resources != nullptr) {
+      drmModeFreeResources(resources);
+    }
+    close(fd);
+    if (has_connector) {
       return path;
     }
   }
-  return {};
+  return fallback;
+}
+
+std::string describe_drm_devices() {
+  std::ostringstream output;
+  bool found_device = false;
+  for (int index = 0; index < 16; ++index) {
+    const std::string path = "/dev/dri/card" + std::to_string(index);
+    if (!std::filesystem::exists(path)) {
+      continue;
+    }
+    found_device = true;
+    output << path;
+    const int fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+      output << ": cannot open (" << std::strerror(errno) << ")\n";
+      continue;
+    }
+    drmModeRes* resources = drmModeGetResources(fd);
+    if (resources == nullptr) {
+      output << ": cannot query resources (" << std::strerror(errno) << ")\n";
+      close(fd);
+      continue;
+    }
+    output << ": " << resources->count_connectors << " connector(s)\n";
+    for (int connector_index = 0;
+         connector_index < resources->count_connectors; ++connector_index) {
+      drmModeConnector* connector =
+          drmModeGetConnector(fd, resources->connectors[connector_index]);
+      if (connector == nullptr) {
+        continue;
+      }
+      const char* type = drmModeGetConnectorTypeName(connector->connector_type);
+      const char* status = connector->connection == DRM_MODE_CONNECTED
+                               ? "connected"
+                               : connector->connection == DRM_MODE_DISCONNECTED
+                                     ? "disconnected"
+                                     : "unknown";
+      output << "  - " << (type == nullptr ? "unknown" : type) << '-'
+             << connector->connector_type_id << ": " << status << ", "
+             << connector->count_modes << " mode(s)\n";
+      drmModeFreeConnector(connector);
+    }
+    drmModeFreeResources(resources);
+    close(fd);
+  }
+  if (!found_device) {
+    output << "No DRM device found. Expected /dev/dri/card*.\n";
+  }
+  return output.str();
 }
 
 KmsDisplay::KmsDisplay(std::string device_path)

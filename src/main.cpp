@@ -17,7 +17,8 @@ void handle_signal(int) { keep_running = false; }
 
 void print_usage(std::ostream& output) {
   output << "Usage: hdmi_test [--device /dev/dri/cardN]\n"
-         << "Direct DRM/KMS HDMI test screen. Press Ctrl-C to restore the "
+         << "       hdmi_test --probe\n"
+         << "Direct DRM/KMS display test screen. Press Ctrl-C to restore the "
             "previous display state and exit.\n";
 }
 
@@ -25,11 +26,16 @@ void print_usage(std::ostream& output) {
 
 int main(int argc, char* argv[]) {
   std::string device_path;
+  bool probe_only = false;
   for (int index = 1; index < argc; ++index) {
     const std::string argument = argv[index];
     if (argument == "--help" || argument == "-h") {
       print_usage(std::cout);
       return 0;
+    }
+    if (argument == "--probe") {
+      probe_only = true;
+      continue;
     }
     if (argument == "--device" && index + 1 < argc) {
       device_path = argv[++index];
@@ -38,6 +44,15 @@ int main(int argc, char* argv[]) {
     std::cerr << "Unknown or incomplete argument: " << argument << '\n';
     print_usage(std::cerr);
     return 2;
+  }
+
+  if (probe_only) {
+    if (!device_path.empty()) {
+      std::cerr << "--probe cannot be combined with --device.\n";
+      return 2;
+    }
+    std::cout << hdmi_test::describe_drm_devices();
+    return 0;
   }
 
   if (device_path.empty()) {

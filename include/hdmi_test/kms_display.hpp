@@ -37,5 +37,6 @@ class KmsDisplay {
 };
 
 std::string find_drm_device();
+std::string describe_drm_devices();
 
 }  // namespace hdmi_test

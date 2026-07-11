@@ -8,6 +8,7 @@
 - 实现纯内存 ARGB8888 测试画面：深色背景、标题栏、网格、三种状态色卡片和 RGB 色条。
 - 实现 DRM/KMS 输出：自动发现 `/dev/dri/card*`、优先选择 HDMI connector、选择首选 mode、创建 dumb buffer、设置 CRTC，并在退出时恢复原 CRTC 状态。
 - 实现 `--device /dev/dri/cardN` 和 `--help`。
+- 修复自动设备选择：跳过没有 connector 的 `card0`，优先选取有 connector 的 `card1`；新增 `--probe` 列出每张 card 的 connector、连接状态和 mode 数量。
 - 建立不依赖显示硬件的单元测试，并完成构建与测试。
 
 ## 验证结果
@@ -19,6 +20,7 @@
 | 5：帮助页 | `./build/hdmi_test --help` | 通过 |
 | 5：无设备诊断 | 受限执行环境中运行 `./build/hdmi_test` | 通过；返回 1 并明确提示 `/dev/dri/card*` |
 | 5：当前设备诊断 | `./build/hdmi_test --device /dev/dri/card1` | 返回 1：没有已连接且有显示模式的 connector |
+| 5：硬件清单 | `./build/hdmi_test --probe` | 通过；`card0` 没有 connector，`card1` 有 `DP-1`，但它是 `disconnected` 且有 0 个 mode |
 | 5/6：实际 HDMI 点亮 | 在本机运行 | 阻塞：`card1-DP-1` 状态为 `disconnected`，没有可用 mode |
 
 ## 环境观察（2026-07-12）
@@ -29,6 +31,7 @@
 - 当前完整主机环境存在 `/dev/dri/card0`、`/dev/dri/card1` 和对应的 `/dev/char/226:*` 设备节点；当前用户属于 `video` 组，可打开 `card1`。
 - 先前“设备节点不存在”的结果来自受限执行环境没有暴露 `/dev/dri`，不是主机的真实硬件故障。
 - 当前唯一可见 connector 是 `card1-DP-1`，其 `status` 为 `disconnected`，没有可用 mode。这是当前 HDMI 实机验证的真实阻塞。
+- 主板型号：`NVIDIA Jetson Orin Nano Developer Kit`。根据 DRM 的实际枚举，正确显示设备是 `/dev/dri/card1`，正确 connector 是 `DP-1`；`card0` 不是外部显示输出设备。
 - Qt 与 CMake 当前未安装；本阶段刻意不依赖它们。
 
 ## 外部阻塞与下一步

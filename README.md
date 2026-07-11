@@ -27,6 +27,7 @@
 make test
 make
 ./build/hdmi_test --help
+./build/hdmi_test --probe
 ./build/hdmi_test
 ```
 
@@ -40,4 +41,4 @@ make
 
 ## 当前硬件阻塞
 
-当前主机存在 DRM 设备节点，但内核将唯一可见的 `card1-DP-1` connector 报告为 `disconnected`，因此还不能完成 HDMI 实机点亮。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
+本机的自动选择会跳过没有 connector 的 `card0`，选择直接显示设备 `card1`。当前主机将唯一可见的 `card1-DP-1` connector 报告为 `disconnected`，因此还不能完成实机点亮。详情见 [实施记录](context/impl/hdmi-test-screen.md)。
