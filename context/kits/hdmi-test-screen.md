@@ -55,3 +55,6 @@
 - [ ] CPU 利用率、内存和 GPU load 的解析逻辑有无硬件依赖的单元测试。**Gate 2**
 - [ ] 测试画面显示目标 60 FPS、当前输出刷新率和实时指标。**Gate 5/6**
 - [ ] 系统指标最多每秒读取一次；渲染路径不启动 `tegrastats` 等常驻采样子进程。**Gate 4**
+- [ ] 动态压力背景必须由 EGL/OpenGL ES shader 生成，不允许 CPU 每帧逐像素生成全屏背景。**Gate 4**
+- [ ] 帧提交由 Wayland frame callback / EGL swap interval 驱动，不得在完整渲染之后额外固定 sleep 16.67ms。**Gate 4**
+- [ ] 连续 60 秒实测平均 FPS ≥ 59.0，且 p99 frame time ≤ 20ms。**Gate 4**

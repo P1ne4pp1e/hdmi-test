@@ -157,6 +157,16 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 运行验证：`hdmi-weston-smoke.service` 为 `active (running)`，客户端内存约 3.4 MiB。
 
+## Revision：FPS 未达到 60、GPU 波动（2026-07-12）
+
+**WHAT**：用户观察到 GPU 使用率忽高忽低，实测 FPS 无法跑满。
+
+**WHY**：当前动态背景由 CPU 对 800×480 全屏逐像素生成，再通过 `wl_shm` 交给 Weston 合成；GPU只承担间歇性纹理上传和合成。同时每帧 roundtrip 后又固定 sleep 16.67ms，使总帧时间等于“绘制时间 + 同步时间 + 16.67ms”，理论上无法稳定 60 FPS。
+
+**RULE**：压力背景必须由 GPU shader 生成；帧调度必须由 Wayland frame callback 或 EGL swap interval 驱动，不允许渲染完成后再追加完整帧周期 sleep。
+
+**LAYER**：`context/kits/hdmi-test-screen.md` R5 与实现计划缺少 GPU 生成和帧调度约束，现已补充。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
