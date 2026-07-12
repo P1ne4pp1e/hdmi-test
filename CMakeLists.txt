@@ -10,6 +10,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client)
 pkg_check_modules(FONT REQUIRED IMPORTED_TARGET freetype2 fontconfig)
+pkg_check_modules(EGL REQUIRED IMPORTED_TARGET egl glesv2 wayland-egl)
 find_package(X11 REQUIRED)
 
 add_library(hdmi_test_pattern src/test_pattern.cpp)
@@ -36,6 +37,11 @@ add_executable(hdmi_wayland_kiosk
 target_include_directories(hdmi_wayland_kiosk PRIVATE generated)
 target_link_libraries(hdmi_wayland_kiosk PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::FONT)
 target_compile_options(hdmi_wayland_kiosk PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
+
+add_executable(hdmi_egl_stress src/egl_stress.cpp generated/xdg-shell-protocol.cpp)
+target_include_directories(hdmi_egl_stress PRIVATE generated)
+target_link_libraries(hdmi_egl_stress PRIVATE PkgConfig::WAYLAND PkgConfig::EGL)
+target_compile_options(hdmi_egl_stress PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
 
 enable_testing()
 add_executable(test_pattern tests/test_pattern.cpp)

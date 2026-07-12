@@ -21,3 +21,9 @@
 **Success Criteria**: 不依赖 GNOME 桌面仍可输出测试画面，并记录性能与启动行为。
 **Tests**: 停止图形桌面后的实机启动、重启后自启动、HDMI 人工审查。
 **Status**: In Progress
+
+## Stage 5: GPU 压力渲染与共存基线
+**Goal**: 以 EGL/OpenGL ES shader 生成动态背景，并建立 Idle、Monitor、Stress 与 YOLO 共存的性能基线。
+**Success Criteria**: GPU 背景可由 vsync 驱动稳定输出；HUD 不会成为每帧 CPU 瓶颈；可量化 GPU 压力对推理延迟的影响。
+**Tests**: EGL 客户端能连接 Weston、shader 编译成功、`eglSwapInterval(1)` 生效、60 秒帧时间与资源采样记录。
+**Status**: In Progress

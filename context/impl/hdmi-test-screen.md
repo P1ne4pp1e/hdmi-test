@@ -167,6 +167,12 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 **LAYER**：`context/kits/hdmi-test-screen.md` R5 与实现计划缺少 GPU 生成和帧调度约束，现已补充。
 
+## EGL/GLES GPU 压力路径基线（2026-07-12）
+
+新增 `hdmi_egl_stress`：它在当前 NVIDIA Weston 直接会话中创建 EGL Wayland window surface、OpenGL ES 2 context 和动态 fragment shader，并启用 `eglSwapInterval(1)`。实机以 `timeout 5s` 运行，进程仅因预期超时退出（124），说明 GPU shader 路径可用。
+
+当前该客户端仅用于 GPU 背景基线验证；下一步把 FreeType HUD 改为低频生成纹理并在 GLES 中叠加，以同时保留可读指标和 GPU 压力背景。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
