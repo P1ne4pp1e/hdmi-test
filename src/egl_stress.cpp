@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -157,8 +158,8 @@ GLuint create_program() {
       // Use only continuous, low-frequency functions for the motion test.
       // Fine repeating `fract` grids alias on a 800×480 panel and can look as
       // though frames are missing even when presentation is stable.
-      float wave = 0.5 + 0.5 * sin(uv.x * 8.0 + uv.y * 4.0 + time * 2.8);
-      float diagonal = 0.5 + 0.5 * sin(uv.x * 5.0 - uv.y * 7.0 - time * 2.1);
+      float wave = 0.5 + 0.5 * sin(uv.x * 8.0 + uv.y * 4.0 + time * 1.5707963);
+      float diagonal = 0.5 + 0.5 * sin(uv.x * 5.0 - uv.y * 7.0 - time * 3.1415926);
       // A tiled sweep keeps constant velocity.  At the panel edges the next
       // sweep enters immediately, so there is no slow-down or turn-around.
       float scanPhase = fract(uv.x - time * 0.25);
@@ -302,7 +303,10 @@ int main() {
                       GL_UNSIGNED_BYTE, hud_rgba.data());
       sample_time = now;
     }
-    const float elapsed = std::chrono::duration<float>(now - start).count();
+    // Fragment mediump floats lose sub-frame precision as an unbounded time
+    // value grows.  All animation terms are periodic over four seconds, so a
+    // bounded phase preserves seamless motion indefinitely.
+    const float elapsed = std::fmod(std::chrono::duration<float>(now - start).count(), 4.0F);
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));
     glUniform1f(time, elapsed);
     glActiveTexture(GL_TEXTURE0);
