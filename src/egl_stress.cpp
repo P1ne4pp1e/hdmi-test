@@ -30,24 +30,33 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
               std::uint64_t frame) {
   std::fill(pixels.begin(), pixels.end(), 0U);
   constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U;
+  const auto draw_right = [&font, &pixels](int right, int baseline, const char* value,
+                                           int pixel_size, std::uint32_t color) {
+    font.draw(pixels.data(), kWidth, kHeight,
+              right - font.text_width(value, pixel_size), baseline, value, pixel_size, color);
+  };
   font.draw(pixels.data(), kWidth, kHeight, 24, 31, "HDMI PERFORMANCE LAB", 22, kWhite);
   font.draw(pixels.data(), kWidth, kHeight, 24, 52, "Native Wayland / NVIDIA DRM", 13, kMuted);
-  font.draw(pixels.data(), kWidth, kHeight, 646, 38, "LIVE  60 Hz", 15, kCyan);
+  draw_right(764, 38, "LIVE  60 Hz", 15, kCyan);
   char text[80]{};
   font.draw(pixels.data(), kWidth, kHeight, 40, 112, "FRAME RATE", 13, kMuted);
   std::snprintf(text, sizeof(text), "%.1f FPS", fps);
   font.draw(pixels.data(), kWidth, kHeight, 40, 163, text, 34, kWhite);
   const char* labels[] = {"CPU LOAD", "GPU LOAD", "MEMORY"};
+  const int baselines[] = {113, 173, 233};
+  const double memory_used_gib = static_cast<double>(memory.used_kib) / (1024.0 * 1024.0);
+  const double memory_total_gib = static_cast<double>(memory.total_kib) / (1024.0 * 1024.0);
   for (int index = 0; index < 3; ++index) {
-    const int x = 332 + index * 148;
-    font.draw(pixels.data(), kWidth, kHeight, x, 112, labels[index], 12, kMuted);
+    font.draw(pixels.data(), kWidth, kHeight, 340, baselines[index], labels[index], 13, kMuted);
     if (index == 0) std::snprintf(text, sizeof(text), "%.1f%%", cpu);
     if (index == 1) std::snprintf(text, sizeof(text), "%.1f%%", gpu);
-    if (index == 2) std::snprintf(text, sizeof(text), "%llu/%llu MB", static_cast<unsigned long long>(memory.used_kib/1024), static_cast<unsigned long long>(memory.total_kib/1024));
-    font.draw(pixels.data(), kWidth, kHeight, x, 153, text, index == 2 ? 18 : 24, kWhite);
+    if (index == 2) std::snprintf(text, sizeof(text), "%.1f / %.1f GB", memory_used_gib, memory_total_gib);
+    draw_right(760, baselines[index], text, 20, kWhite);
   }
-  std::snprintf(text, sizeof(text), "Frame %llu   GPU shader stress background", static_cast<unsigned long long>(frame));
-  font.draw(pixels.data(), kWidth, kHeight, 40, 447, text, 13, kMuted);
+  std::snprintf(text, sizeof(text), "FRAME  %llu", static_cast<unsigned long long>(frame));
+  font.draw(pixels.data(), kWidth, kHeight, 40, 312, text, 13, kMuted);
+  font.draw(pixels.data(), kWidth, kHeight, 40, 340, "GPU SHADER STRESS BACKGROUND", 16, kWhite);
+  font.draw(pixels.data(), kWidth, kHeight, 40, 365, "V-SYNC ENABLED  /  HUD UPDATE 1 Hz", 13, kMuted);
 }
 
 struct App {
@@ -61,6 +70,8 @@ struct App {
   EGLDisplay egl_display = EGL_NO_DISPLAY;
   EGLSurface egl_surface = EGL_NO_SURFACE;
   EGLContext egl_context = EGL_NO_CONTEXT;
+  wl_callback* frame_callback = nullptr;
+  bool frame_presented = true;
 };
 
 void registry_global(void* data, wl_registry* registry, std::uint32_t name,
@@ -90,6 +101,22 @@ void top_configure(void*, xdg_toplevel*, int, int, wl_array*) {}
 void top_close(void*, xdg_toplevel*) {}
 void top_bounds(void*, xdg_toplevel*, int, int) {}
 const xdg_toplevel_listener kTopListener{top_configure, top_close, top_bounds};
+
+void frame_done(void* data, wl_callback* callback, std::uint32_t) {
+  auto& app = *static_cast<App*>(data);
+  wl_callback_destroy(callback);
+  app.frame_callback = nullptr;
+  app.frame_presented = true;
+}
+const wl_callback_listener kFrameListener{frame_done};
+
+bool wait_for_presented_frame(App& app) {
+  app.frame_callback = wl_surface_frame(app.surface);
+  if (!app.frame_callback) return false;
+  app.frame_presented = false;
+  wl_callback_add_listener(app.frame_callback, &kFrameListener, &app);
+  return true;
+}
 
 GLuint compile_shader(GLenum type, const char* source) {
   const GLuint shader = glCreateShader(type);
@@ -127,12 +154,17 @@ GLuint create_program() {
     void main() {
       vec2 uv = gl_FragCoord.xy / resolution;
       vec2 hudUv = vec2(uv.x, 1.0 - uv.y);
-      float grid = step(0.985, fract(uv.x * 13.0 + time * 0.08)) +
-                   step(0.985, fract(uv.y * 8.0 - time * 0.05));
-      float wave = 0.5 + 0.5 * sin(uv.x * 22.0 + uv.y * 9.0 + time * 2.0);
-      float scan = smoothstep(0.94, 1.0, fract(uv.x + time * 0.12));
+      // Use only continuous, low-frequency functions for the motion test.
+      // Fine repeating `fract` grids alias on a 800×480 panel and can look as
+      // though frames are missing even when presentation is stable.
+      float wave = 0.5 + 0.5 * sin(uv.x * 8.0 + uv.y * 4.0 + time * 2.8);
+      float diagonal = 0.5 + 0.5 * sin(uv.x * 5.0 - uv.y * 7.0 - time * 2.1);
+      // Keep the vertical scan line, but make it bounce at the two edges
+      // rather than teleporting from one edge to the other.
+      float scanPosition = 0.5 + 0.5 * sin(time * 0.72);
+      float scan = 1.0 - smoothstep(0.0, 0.022, abs(uv.x - scanPosition));
       vec3 base = mix(vec3(0.02, 0.07, 0.13), vec3(0.03, 0.22, 0.36), wave);
-      base += grid * vec3(0.03, 0.18, 0.28);
+      base += diagonal * vec3(0.01, 0.07, 0.11);
       base += scan * vec3(0.05, 0.65, 0.65);
 
       // The CPU texture deliberately contains glyph pixels only.  Additive
@@ -140,16 +172,16 @@ GLuint create_program() {
       // GPU own the dynamic test canvas on every frame.
       float header = rectangle(hudUv, vec4(0.025, 0.025, 0.95, 0.115));
       float fpsCard = rectangle(hudUv, vec4(0.025, 0.175, 0.35, 0.365));
-      float cpuCard = rectangle(hudUv, vec4(0.400, 0.175, 0.180, 0.190));
-      float gpuCard = rectangle(hudUv, vec4(0.595, 0.175, 0.180, 0.190));
-      float ramCard = rectangle(hudUv, vec4(0.790, 0.175, 0.185, 0.190));
+      float cpuCard = rectangle(hudUv, vec4(0.400, 0.175, 0.575, 0.108));
+      float gpuCard = rectangle(hudUv, vec4(0.400, 0.300, 0.575, 0.108));
+      float ramCard = rectangle(hudUv, vec4(0.400, 0.425, 0.575, 0.108));
       float footer = rectangle(hudUv, vec4(0.025, 0.575, 0.95, 0.375));
       float panel = max(max(header, fpsCard), max(max(cpuCard, gpuCard), max(ramCard, footer)));
       float inset = max(max(rectangle(hudUv, vec4(0.028, 0.028, 0.944, 0.109)),
                             rectangle(hudUv, vec4(0.028, 0.178, 0.344, 0.359))),
-                        max(max(rectangle(hudUv, vec4(0.403, 0.178, 0.174, 0.184)),
-                                rectangle(hudUv, vec4(0.598, 0.178, 0.174, 0.184))),
-                            max(rectangle(hudUv, vec4(0.793, 0.178, 0.179, 0.184)),
+                        max(max(rectangle(hudUv, vec4(0.403, 0.178, 0.569, 0.102)),
+                                rectangle(hudUv, vec4(0.403, 0.303, 0.569, 0.102))),
+                            max(rectangle(hudUv, vec4(0.403, 0.428, 0.569, 0.102)),
                                 rectangle(hudUv, vec4(0.028, 0.578, 0.944, 0.369)))));
       base = mix(base, vec3(0.025, 0.070, 0.115), panel * 0.82);
       base += (panel - inset) * vec3(0.10, 0.26, 0.36);
@@ -241,13 +273,17 @@ int main() {
   hdmi_test::MemoryUsage memory{};
   double cpu = 0.0, gpu = 0.0, fps = 0.0;
   std::uint64_t frame = 0, measured_frames = 0;
-  auto sample_time = start, fps_time = start;
+  auto sample_time = start, fps_time = start, log_time = start;
   for (;;) {
     const auto now = std::chrono::steady_clock::now();
     if (now - fps_time >= std::chrono::seconds(1)) {
       fps = measured_frames / std::chrono::duration<double>(now - fps_time).count();
       measured_frames = 0;
       fps_time = now;
+    }
+    if (now - log_time >= std::chrono::seconds(5)) {
+      std::fprintf(stderr, "hdmi_egl_stress: %.1f FPS\n", fps);
+      log_time = now;
     }
     if (now - sample_time >= std::chrono::seconds(1)) {
       const auto current_cpu = hdmi_test::parse_cpu_times(read_file("/proc/stat"));
@@ -272,8 +308,11 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, hud_texture);
     glUniform1i(hud_uniform, 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    if (!wait_for_presented_frame(app)) return 6;
     if (!eglSwapBuffers(app.egl_display, app.egl_surface)) return 5;
-    wl_display_dispatch_pending(app.display);
+    while (!app.frame_presented && wl_display_dispatch(app.display) != -1) {
+    }
+    if (!app.frame_presented) return 7;
     ++frame;
     ++measured_frames;
   }
