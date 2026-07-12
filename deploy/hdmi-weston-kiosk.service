@@ -10,7 +10,7 @@ User=root
 RuntimeDirectory=hdmi-kiosk
 RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/hdmi-kiosk
-ExecStart=/usr/lib/aarch64-linux-gnu/nvidia/weston-13.0/weston --backend=drm-backend.so --drm-device=card1 --shell=fullscreen-shell.so --config=/etc/hdmi-kiosk/weston.ini --socket=wayland-0 --current-mode --continue-without-input --log=/var/log/hdmi-weston-kiosk.log
+ExecStart=/usr/lib/aarch64-linux-gnu/nvidia/weston-13.0/weston --backend=drm-backend.so --drm-device=card1 --shell=desktop-shell.so --config=/etc/hdmi-kiosk/weston.ini --socket=wayland-0 --current-mode --continue-without-input --log=/var/log/hdmi-weston-kiosk.log
 Restart=on-failure
 RestartSec=2
 

@@ -143,6 +143,14 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 下一项工作是把自有 CPU/GPU/内存/FPS 调试画面从临时 X11 客户端迁移为 Wayland 客户端，替换 `weston-fullscreen` 冒烟客户端。
 
+## 原生 Wayland 调试客户端迁移状态
+
+官方 `weston-fullscreen` 只显示基础示例图形，不满足调试画面要求。尝试通过 Xwayland 复用 X11 面板失败：当前 NVIDIA Weston 安装缺少 `xwayland.so` 模块，已立即回退，避免 compositor 持续重启。
+
+已安装 `wayland-protocols` 并开始实现共享内存 Wayland 客户端；当前 Weston desktop shell 使用 `xdg-shell`，而初版客户端使用的旧 `wl_shell` 不可用，尚未替换成功。为避免屏幕空白，当前 `hdmi-weston-smoke.service` 已固定为已验证可运行的 `weston-simple-egl` 直接输出回退客户端。Weston 与回退客户端均为 `active`。
+
+后续必须完成 xdg-shell 客户端绑定、共享内存双缓冲和指标绘制，才能将 CPU/GPU/内存/FPS 面板带回无桌面链路。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
