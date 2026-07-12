@@ -1,0 +1,18 @@
+[Unit]
+Description=HDMI NVIDIA Weston kiosk compositor
+Conflicts=display-manager.service
+After=systemd-user-sessions.service
+OnFailure=hdmi-kiosk-recovery.service
+
+[Service]
+Type=simple
+User=root
+RuntimeDirectory=hdmi-kiosk
+RuntimeDirectoryMode=0755
+Environment=XDG_RUNTIME_DIR=/run/hdmi-kiosk
+ExecStart=/usr/lib/aarch64-linux-gnu/nvidia/weston-13.0/weston --backend=drm-backend.so --drm-device=card1 --shell=fullscreen-shell.so --config=/etc/hdmi-kiosk/weston.ini --socket=wayland-0 --current-mode --continue-without-input --log=/var/log/hdmi-weston-kiosk.log
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -20,4 +20,4 @@
 **Goal**: 选择并验证 JetPack NVIDIA 支持的 kiosk/直接输出后端，替代临时 X11 测试路径。
 **Success Criteria**: 不依赖 GNOME 桌面仍可输出测试画面，并记录性能与启动行为。
 **Tests**: 停止图形桌面后的实机启动、重启后自启动、HDMI 人工审查。
-**Status**: Not Started
+**Status**: In Progress

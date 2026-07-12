@@ -1,0 +1,16 @@
+[Unit]
+Description=HDMI Weston direct-output smoke client
+After=hdmi-weston-kiosk.service
+Requires=hdmi-weston-kiosk.service
+
+[Service]
+Type=simple
+User=root
+Environment=XDG_RUNTIME_DIR=/run/hdmi-kiosk
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStart=/usr/lib/aarch64-linux-gnu/nvidia/weston-13.0/weston-simple-egl
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

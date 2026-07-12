@@ -117,6 +117,17 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 这只消除当前 GNOME 过渡方案的干扰，不替代 Stage 4 的无桌面独占显示后端。
 
+## Stage 4：NVIDIA Weston kiosk 准备（进行中）
+
+目标系统已安装 JetPack NVIDIA Weston 13：包含 `drm-backend.so`、`gl-renderer.so`、`fullscreen-shell.so` 与 `weston-simple-egl`。已在 `deploy/` 准备：
+
+- `weston-kiosk.ini`：禁用 idle、采用 fullscreen shell；
+- `hdmi-weston-kiosk.service`：通过 `card1` 启动 DRM backend；
+- `hdmi-weston-smoke.service`：使用 NVIDIA/Weston 的 EGL 示例作为首个直接输出冒烟客户端；
+- `hdmi-kiosk-recovery.service`：compositor 启动失败时恢复 GDM。
+
+尚未激活这些系统服务。当前普通用户执行 `systemctl stop gdm.service` 返回 `Interactive authentication required`，且 `sudo -n` 要求密码；因此必须先获得系统级 systemd 授权，才能在不破坏远程恢复路径的前提下停止 GDM 并执行实机验证。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
