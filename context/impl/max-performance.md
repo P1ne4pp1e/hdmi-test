@@ -16,17 +16,21 @@
 ## 应用策略
 
 1. 保持 nvpmodel 在模式 `0`；它是当前硬件支持的最高功耗预算。
-2. 用 `jetson_clocks` 锁定 CPU、GPU、EMC 到该预算允许的最高频率，并使用 `--fan` 防止持续负载热降频。
+2. 用 `jetson_clocks` 锁定 CPU、GPU、EMC 到该预算允许的最高频率；保留 `nvfancontrol` 的温度曲线自动调节风扇。
 3. 安装 `hdmi-max-performance.service`，确保设置在 Weston 与显示客户端前完成并在开机后恢复。
 4. 不替换 nvpmodel 硬件配置、不修改电压、不超频；这些做法会越过 NVIDIA 针对当前模块定义的安全边界。
 
 ## 已应用与验证（2026-07-12）
 
-- 已执行 `nvpmodel -m 0` 和 `jetson_clocks --fan`。
+- 已执行 `nvpmodel -m 0` 和 `jetson_clocks`。
 - 已安装并启用 `hdmi-max-performance.service`；它在每次启动时重新应用上述设置，并排在 Weston/HDMI 客户端之前。
-- `jetson_clocks --show` 验证：6 个 CPU 核全部固定 `1510400 kHz`，GPU 固定 `624750000 Hz`，EMC 固定 `2133000000 Hz`，CPU idle states 已禁用，风扇 PWM 为 `255`。
+- `jetson_clocks --show` 验证：6 个 CPU 核全部固定 `1510400 kHz`，GPU 固定 `624750000 Hz`，EMC 固定 `2133000000 Hz`，CPU idle states 已禁用。
 - 10 秒 `tegrastats` 验证：CPU `1510 MHz`、GPU `624 MHz`、EMC `2133 MHz` 持续保持；GPU 温度约 `43–44°C`，没有温度限制；HDMI 客户端持续记录 `60.0 FPS`。
-- 未禁用 Weston、NVIDIA 驱动、`nvfancontrol` 或其他业务服务；高性能设置只锁定硬件频率与风扇。
+- 未禁用 Weston、NVIDIA 驱动、`nvfancontrol` 或其他业务服务；高性能设置只锁定硬件频率。
+
+## 风扇策略修订（2026-07-12）
+
+持续满速风扇只适合短时压力测试，不适合常驻运行。性能服务不再传递 `--fan`；已重新启动 `nvfancontrol.service`，风扇恢复为由温度曲线控制的动态转速。CPU/GPU/EMC 的最高频率锁定不受此修改影响。
 
 ## 回退
 
