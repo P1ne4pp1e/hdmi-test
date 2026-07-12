@@ -8,13 +8,13 @@
 **Goal**: 验证在 Jetson 当前显示驱动栈中可用的无桌面直出路径，并输出测试画面。
 **Success Criteria**: 选定的后端能使用当前 HDMI 输出、设置目标模式并显示画面；退出时恢复或由显示服务接管状态。
 **Tests**: 单元测试验证画面布局与像素格式；在目标设备执行人工 HDMI 冒烟测试。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: 当前显示栈的可见测试画面
 **Goal**: 经当前 NVIDIA X 显示栈在已验证的 HDMI 屏上显示低资源 C++ 全屏测试画面和实时指标。
 **Success Criteria**: 原生 X11 测试程序在 `:1` 的 800×480@59.97Hz 屏幕上全屏显示；显示 60 FPS 目标、帧率、CPU、GPU、内存和帧序号；可由服务模板在图形会话后启动。
 **Tests**: `make test`、`make x11-kiosk`、`xwininfo -root -tree`、人工核对 HDMI 屏。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: 无桌面 NVIDIA 后端验证
 **Goal**: 选择并验证 JetPack NVIDIA 支持的 kiosk/直接输出后端，替代临时 X11 测试路径。

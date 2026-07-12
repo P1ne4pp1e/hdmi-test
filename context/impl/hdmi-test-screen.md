@@ -128,6 +128,21 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 尚未激活这些系统服务。当前普通用户执行 `systemctl stop gdm.service` 返回 `Interactive authentication required`，且 `sudo -n` 要求密码；因此必须先获得系统级 systemd 授权，才能在不破坏远程恢复路径的前提下停止 GDM 并执行实机验证。
 
+## Stage 4：NVIDIA Weston 直接输出验证（2026-07-12）
+
+已获得系统级授权并完成受监控切换：
+
+- 已停止 GDM，并停止用户级 X11 测试服务；GNOME/Xorg 不再持有显示控制权。
+- `hdmi-weston-kiosk.service` 处于 `active (running)`，直接使用 `drm-backend.so` 和 `/dev/dri/card1`。
+- Weston 日志确认：`DP-1` connector 已连接、EDID 为 LONTIUM、当前/首选模式为 `800×480@60.0`。
+- Weston 使用 NVIDIA EGL 1.5、OpenGL ES 3.2 和 Tegra Orin 集成 GPU；未使用软件 pixman renderer。
+- `hdmi-weston-smoke.service` 处于 `active (running)`，使用 `weston-fullscreen` 全屏客户端显示直接输出画面。
+- 当前服务报告：Weston 约 14.3 MiB，fullscreen 冒烟客户端约 5.8 MiB；这不包含内核/GPU 驱动开销，但已移除 GNOME、GDM、Xorg 和 Mutter 的额外常驻显示层。
+
+此前 `libdrm` 原型在 GDM/Xorg 占用 DRM master 时看到 connector 状态不一致；在 Weston 直接取得 DRM master 后，标准 DRM backend 正确识别了已连接 HDMI/TMDS 输出。这验证了最终路线为 NVIDIA Weston kiosk，而非继续保留桌面。
+
+下一项工作是把自有 CPU/GPU/内存/FPS 调试画面从临时 X11 客户端迁移为 Wayland 客户端，替换 `weston-fullscreen` 冒烟客户端。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
