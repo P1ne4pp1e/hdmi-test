@@ -11,9 +11,9 @@
 **Status**: In Progress
 
 ## Stage 3: 当前显示栈的可见测试画面
-**Goal**: 经当前 NVIDIA X 显示栈在已验证的 HDMI 屏上显示 C++ 全屏测试画面。
-**Success Criteria**: 原生 X11 测试程序在 `:1` 的 800×480 屏幕上全屏显示；可由服务模板在图形会话后启动。
-**Tests**: `make x11-kiosk`、`xwininfo -root -tree`、人工核对 HDMI 屏。
+**Goal**: 经当前 NVIDIA X 显示栈在已验证的 HDMI 屏上显示低资源 C++ 全屏测试画面和实时指标。
+**Success Criteria**: 原生 X11 测试程序在 `:1` 的 800×480@59.97Hz 屏幕上全屏显示；显示 60 FPS 目标、帧率、CPU、GPU、内存和帧序号；可由服务模板在图形会话后启动。
+**Tests**: `make test`、`make x11-kiosk`、`xwininfo -root -tree`、人工核对 HDMI 屏。
 **Status**: In Progress
 
 ## Stage 4: 无桌面 NVIDIA 后端验证

@@ -1,6 +1,8 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 
+#include "hdmi_test/system_metrics.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -8,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <unistd.h>
@@ -24,9 +27,47 @@ unsigned long rgb(unsigned char red, unsigned char green, unsigned char blue) {
          static_cast<unsigned long>(blue);
 }
 
+std::string read_file(const char* path) {
+  std::ifstream file(path);
+  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+struct LiveMetrics {
+  double cpu_percent = 0.0;
+  double gpu_percent = 0.0;
+  hdmi_test::MemoryUsage memory{};
+};
+
+class SystemMetricsSampler {
+ public:
+  LiveMetrics sample() {
+    LiveMetrics metrics{};
+    const auto current_cpu = hdmi_test::parse_cpu_times(read_file("/proc/stat"));
+    if (current_cpu.has_value()) {
+      if (previous_cpu_.has_value()) {
+        metrics.cpu_percent = hdmi_test::compute_cpu_percent(*previous_cpu_, *current_cpu);
+      }
+      previous_cpu_ = current_cpu;
+    }
+    const auto memory = hdmi_test::parse_memory_usage(read_file("/proc/meminfo"));
+    if (memory.has_value()) {
+      metrics.memory = *memory;
+    }
+    const auto gpu = hdmi_test::parse_gpu_load_percent(
+        read_file("/sys/devices/platform/bus@0/17000000.gpu/load"));
+    if (gpu.has_value()) {
+      metrics.gpu_percent = *gpu;
+    }
+    return metrics;
+  }
+
+ private:
+  std::optional<hdmi_test::CpuTimes> previous_cpu_;
+};
+
 void draw(Display* display, Drawable target, GC graphics, int width, int height,
           std::uint64_t frame_number, double frames_per_second,
-          std::chrono::seconds uptime) {
+          std::chrono::seconds uptime, const LiveMetrics& metrics) {
   XSetForeground(display, graphics, rgb(11, 18, 32));
   XFillRectangle(display, target, graphics, 0, 0, static_cast<unsigned>(width),
                  static_cast<unsigned>(height));
@@ -56,8 +97,8 @@ void draw(Display* display, Drawable target, GC graphics, int width, int height,
                                   rgb(255, 183, 77)};
   const char* labels[] = {"DISPLAY LINK", "FRAME RATE", "FRAME COUNT"};
   char values[3][48]{};
-  std::snprintf(values[0], sizeof(values[0]), "X11 / TMDS");
-  std::snprintf(values[1], sizeof(values[1]), "%.1f FPS", frames_per_second);
+  std::snprintf(values[0], sizeof(values[0]), "59.97 HZ OUTPUT");
+  std::snprintf(values[1], sizeof(values[1]), "%.1f / 60 FPS", frames_per_second);
   std::snprintf(values[2], sizeof(values[2]), "%llu", static_cast<unsigned long long>(frame_number));
   for (int index = 0; index < 3; ++index) {
     const int left = 40 + index * (card_width + 40);
@@ -87,7 +128,10 @@ void draw(Display* display, Drawable target, GC graphics, int width, int height,
   gethostname(host_name, sizeof(host_name) - 1);
   const char* display_name = std::getenv("DISPLAY");
   std::snprintf(debug_label, sizeof(debug_label),
-                "HOST %s | DISPLAY %s | %dx%d | DOUBLE BUFFER | UPTIME %llds",
+                "CPU %.1f%% | GPU %.1f%% | RAM %llu/%llu MiB | HOST %s | DISPLAY %s | %dx%d | DOUBLE BUFFER | UPTIME %llds",
+                metrics.cpu_percent, metrics.gpu_percent,
+                static_cast<unsigned long long>(metrics.memory.used_kib / 1024),
+                static_cast<unsigned long long>(metrics.memory.total_kib / 1024),
                 host_name, display_name == nullptr ? "unknown" : display_name, width,
                 height, static_cast<long long>(uptime.count()));
   XDrawString(display, target, graphics, 32, height - 28, debug_label,
@@ -154,6 +198,9 @@ int main(int argc, char* argv[]) {
   std::uint64_t frame_number = 0;
   std::uint64_t sampled_frames = 0;
   double frames_per_second = 0.0;
+  SystemMetricsSampler metrics_sampler;
+  LiveMetrics metrics = metrics_sampler.sample();
+  auto next_metrics_sample = start_time + std::chrono::seconds(1);
   while (keep_running) {
     while (XPending(display) > 0) {
       XEvent event{};
@@ -167,14 +214,18 @@ int main(int argc, char* argv[]) {
       sample_start = now;
       sampled_frames = 0;
     }
+    if (now >= next_metrics_sample) {
+      metrics = metrics_sampler.sample();
+      next_metrics_sample = now + std::chrono::seconds(1);
+    }
     draw(display, back_buffer, graphics, width, height, frame_number, frames_per_second,
-         std::chrono::duration_cast<std::chrono::seconds>(now - start_time));
+         std::chrono::duration_cast<std::chrono::seconds>(now - start_time), metrics);
     XCopyArea(display, back_buffer, window, graphics, 0, 0, static_cast<unsigned>(width),
               static_cast<unsigned>(height), 0, 0);
     XFlush(display);
     ++frame_number;
     ++sampled_frames;
-    next_frame += std::chrono::milliseconds(33);
+    next_frame += std::chrono::nanoseconds(16'666'667);
     if (next_frame < now) {
       next_frame = now;
     }

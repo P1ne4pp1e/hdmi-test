@@ -98,6 +98,15 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 `Win+L` 仍能锁屏是当前 X11 原型的预期限制：它由 GNOME 管理，未独占系统显示控制权。系统级切换必须停止 GDM/Xorg 并启动 NVIDIA 兼容的 kiosk compositor；当前用户没有免密 sudo，`sudo -n true` 返回“password is required”，因此该系统级切换尚无法由非交互进程执行。
 
+## 60 Hz 与系统指标（2026-07-12）
+
+- HDMI 当前 X RandR 模式为 `800×480@59.97Hz`，这是 60 Hz 级别的实际刷新率。
+- 测试画面渲染循环目标为 60 FPS（每帧约 16.67 ms），且以离屏 Pixmap 双缓冲提交。
+- CPU 使用率通过相邻两次 `/proc/stat` 的总时间与 idle 时间差计算；内存通过 `/proc/meminfo` 的 `MemTotal` 与 `MemAvailable` 计算。
+- Jetson GPU 使用率通过 `/sys/devices/platform/bus@0/17000000.gpu/load` 读取；不会启动常驻 `tegrastats` 子进程。
+- 指标最多每秒采样一次；解析逻辑由 `test_system_metrics` 覆盖并通过。
+- 更新后用户级服务仍为 `active (running)`，systemd 报告内存使用约 0.5 MiB（不含 Xorg/GNOME compositor 的共享/外部资源）。
+
 ## GNOME 通知抑制（2026-07-12）
 
 `update-manager` 的 “Software Updater” 窗口会覆盖当前过渡测试画面。已执行：

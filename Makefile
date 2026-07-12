@@ -9,12 +9,15 @@ X11_LDLIBS := $(shell pkg-config --libs x11)
 BUILD_DIR := build
 APP := $(BUILD_DIR)/hdmi_test
 TEST := $(BUILD_DIR)/test_pattern
+METRICS_TEST := $(BUILD_DIR)/test_system_metrics
 X11_KIOSK := $(BUILD_DIR)/hdmi_x11_kiosk
+X11_KIOSK_SOURCES := src/x11_kiosk.cpp src/system_metrics.cpp
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
 
 TEST_SOURCES := tests/test_pattern.cpp src/test_pattern.cpp
+METRICS_TEST_SOURCES := tests/test_system_metrics.cpp src/system_metrics.cpp
 
 .PHONY: all test x11-kiosk clean
 
@@ -29,14 +32,18 @@ $(BUILD_DIR)/%.o: src/%.cpp | $(BUILD_DIR)
 $(TEST): $(TEST_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@
 
-$(X11_KIOSK): src/x11_kiosk.cpp | $(BUILD_DIR)
-	$(CXX) $(X11_CPPFLAGS) $(CXXFLAGS) $< $(X11_LDLIBS) -o $@
+$(METRICS_TEST): $(METRICS_TEST_SOURCES) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@
+
+$(X11_KIOSK): $(X11_KIOSK_SOURCES) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(X11_CPPFLAGS) $(CXXFLAGS) $^ $(X11_LDLIBS) -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-test: $(TEST)
+test: $(TEST) $(METRICS_TEST)
 	$(TEST)
+	$(METRICS_TEST)
 
 x11-kiosk: $(X11_KIOSK)
 
