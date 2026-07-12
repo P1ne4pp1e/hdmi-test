@@ -151,6 +151,12 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 后续必须完成 xdg-shell 客户端绑定、共享内存双缓冲和指标绘制，才能将 CPU/GPU/内存/FPS 面板带回无桌面链路。
 
+## UI 完整重设计（2026-07-12）
+
+已完成 xdg-shell 原生 Wayland 面板的视觉重构并上线：使用 FreeType/Fontconfig 真实字体，遵循根目录 `DESIGN.md`。背景以约 60 FPS 持续绘制渐变网格、扫描条和压力时间线；前景 HUD 显示实测 FPS、CPU、GPU、内存、frame counter 与 60Hz 输出状态。指标每秒采样一次，避免监控本身制造不必要负载。
+
+运行验证：`hdmi-weston-smoke.service` 为 `active (running)`，客户端内存约 3.4 MiB。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。

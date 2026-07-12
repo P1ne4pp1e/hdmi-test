@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
+pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client)
+pkg_check_modules(FONT REQUIRED IMPORTED_TARGET freetype2 fontconfig)
 find_package(X11 REQUIRED)
 
 add_library(hdmi_test_pattern src/test_pattern.cpp)
@@ -25,6 +27,15 @@ target_compile_options(hdmi_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(hdmi_x11_kiosk src/x11_kiosk.cpp)
 target_link_libraries(hdmi_x11_kiosk PRIVATE X11::X11 hdmi_test_metrics)
 target_compile_options(hdmi_x11_kiosk PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_executable(hdmi_wayland_kiosk
+  src/wayland_kiosk.cpp
+  src/font_renderer.cpp
+  generated/xdg-shell-protocol.cpp
+)
+target_include_directories(hdmi_wayland_kiosk PRIVATE generated)
+target_link_libraries(hdmi_wayland_kiosk PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::FONT)
+target_compile_options(hdmi_wayland_kiosk PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
 
 enable_testing()
 add_executable(test_pattern tests/test_pattern.cpp)

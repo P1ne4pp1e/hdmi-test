@@ -7,6 +7,8 @@ X11_CPPFLAGS := $(shell pkg-config --cflags x11)
 X11_LDLIBS := $(shell pkg-config --libs x11)
 WAYLAND_CPPFLAGS := $(shell pkg-config --cflags wayland-client)
 WAYLAND_LDLIBS := $(shell pkg-config --libs wayland-client)
+FONT_CPPFLAGS := $(shell pkg-config --cflags freetype2 fontconfig)
+FONT_LDLIBS := $(shell pkg-config --libs freetype2 fontconfig)
 
 BUILD_DIR := build
 APP := $(BUILD_DIR)/hdmi_test
@@ -15,7 +17,7 @@ METRICS_TEST := $(BUILD_DIR)/test_system_metrics
 X11_KIOSK := $(BUILD_DIR)/hdmi_x11_kiosk
 X11_KIOSK_SOURCES := src/x11_kiosk.cpp src/system_metrics.cpp
 WAYLAND_KIOSK := $(BUILD_DIR)/hdmi_wayland_kiosk
-WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp generated/xdg-shell-protocol.cpp
+WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
@@ -43,7 +45,7 @@ $(X11_KIOSK): $(X11_KIOSK_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(X11_CPPFLAGS) $(CXXFLAGS) $^ $(X11_LDLIBS) -o $@
 
 $(WAYLAND_KIOSK): $(WAYLAND_KIOSK_SOURCES) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) -o $@
+	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(FONT_LDLIBS) -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
