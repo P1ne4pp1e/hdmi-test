@@ -159,10 +159,11 @@ GLuint create_program() {
       // though frames are missing even when presentation is stable.
       float wave = 0.5 + 0.5 * sin(uv.x * 8.0 + uv.y * 4.0 + time * 2.8);
       float diagonal = 0.5 + 0.5 * sin(uv.x * 5.0 - uv.y * 7.0 - time * 2.1);
-      // Keep the vertical scan line, but make it bounce at the two edges
-      // rather than teleporting from one edge to the other.
-      float scanPosition = 0.5 + 0.5 * sin(time * 0.72);
-      float scan = 1.0 - smoothstep(0.0, 0.022, abs(uv.x - scanPosition));
+      // A tiled sweep keeps constant velocity.  At the panel edges the next
+      // sweep enters immediately, so there is no slow-down or turn-around.
+      float scanPhase = fract(uv.x - time * 0.25);
+      float scanDistance = min(scanPhase, 1.0 - scanPhase);
+      float scan = 1.0 - smoothstep(0.0, 0.022, scanDistance);
       vec3 base = mix(vec3(0.02, 0.07, 0.13), vec3(0.03, 0.22, 0.36), wave);
       base += diagonal * vec3(0.01, 0.07, 0.11);
       base += scan * vec3(0.05, 0.65, 0.65);
