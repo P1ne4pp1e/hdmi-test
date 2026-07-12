@@ -177,6 +177,18 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 FreeType HUD 已改为每秒生成一次 RGBA 纹理；EGL fragment shader 每帧生成动态背景、玻璃面板并合成 HUD。实机运行 6 秒仅因预期 timeout 退出，验证 GPU 背景与 CPU/GPU/RAM/FPS 面板可以共存。正式服务将切换到该客户端。
 
+## Revision：EGL 画面缺少仪表盘且背景观感卡顿（2026-07-12）
+
+**WHAT**：用户看到的只有动态背景，且背景运动不像稳定的测试仪表盘。
+
+**WHY**：EGL 客户端创建并上传了 HUD 纹理，却没有在 fragment shader 中声明或采样该纹理；`hud` uniform 因而无效，所有文字和指标都完全没有输出。背景没有稳定的半透明参照物，进一步放大了运动卡顿的主观感受。
+
+**RULE**：每个已经上传的 HUD 纹理必须在最终 fragment shader 中采样；HUD 的空白区域必须保持透明，并以固定的玻璃面板为动态压力背景提供稳定视觉参照。
+
+**LAYER**：R5 已补充“HUD 必须在 fragment shader 合成”的 Gate 4 验收项；计划第 6 项同步要求验证此合成路径。
+
+HUD 的 800×480 RGBA 存储空间只在初始化时分配一次；后续每秒更新使用 `glTexSubImage2D`，避免在可见渲染周期内重复分配纹理而引入偶发停顿。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。

@@ -116,8 +116,17 @@ GLuint create_program() {
     precision mediump float;
     uniform vec2 resolution;
     uniform float time;
+    uniform sampler2D hud;
+
+    float rectangle(vec2 point, vec4 bounds) {
+      vec2 lower = step(bounds.xy, point);
+      vec2 upper = step(point, bounds.xy + bounds.zw);
+      return lower.x * lower.y * upper.x * upper.y;
+    }
+
     void main() {
       vec2 uv = gl_FragCoord.xy / resolution;
+      vec2 hudUv = vec2(uv.x, 1.0 - uv.y);
       float grid = step(0.985, fract(uv.x * 13.0 + time * 0.08)) +
                    step(0.985, fract(uv.y * 8.0 - time * 0.05));
       float wave = 0.5 + 0.5 * sin(uv.x * 22.0 + uv.y * 9.0 + time * 2.0);
@@ -125,7 +134,27 @@ GLuint create_program() {
       vec3 base = mix(vec3(0.02, 0.07, 0.13), vec3(0.03, 0.22, 0.36), wave);
       base += grid * vec3(0.03, 0.18, 0.28);
       base += scan * vec3(0.05, 0.65, 0.65);
-      gl_FragColor = vec4(base, 1.0);
+
+      // The CPU texture deliberately contains glyph pixels only.  Additive
+      // composition keeps its zero-valued background transparent and lets the
+      // GPU own the dynamic test canvas on every frame.
+      float header = rectangle(hudUv, vec4(0.025, 0.025, 0.95, 0.115));
+      float fpsCard = rectangle(hudUv, vec4(0.025, 0.175, 0.35, 0.365));
+      float cpuCard = rectangle(hudUv, vec4(0.400, 0.175, 0.180, 0.190));
+      float gpuCard = rectangle(hudUv, vec4(0.595, 0.175, 0.180, 0.190));
+      float ramCard = rectangle(hudUv, vec4(0.790, 0.175, 0.185, 0.190));
+      float footer = rectangle(hudUv, vec4(0.025, 0.575, 0.95, 0.375));
+      float panel = max(max(header, fpsCard), max(max(cpuCard, gpuCard), max(ramCard, footer)));
+      float inset = max(max(rectangle(hudUv, vec4(0.028, 0.028, 0.944, 0.109)),
+                            rectangle(hudUv, vec4(0.028, 0.178, 0.344, 0.359))),
+                        max(max(rectangle(hudUv, vec4(0.403, 0.178, 0.174, 0.184)),
+                                rectangle(hudUv, vec4(0.598, 0.178, 0.174, 0.184))),
+                            max(rectangle(hudUv, vec4(0.793, 0.178, 0.179, 0.184)),
+                                rectangle(hudUv, vec4(0.028, 0.578, 0.944, 0.369)))));
+      base = mix(base, vec3(0.025, 0.070, 0.115), panel * 0.82);
+      base += (panel - inset) * vec3(0.10, 0.26, 0.36);
+      base += texture2D(hud, hudUv).rgb;
+      gl_FragColor = vec4(min(base, vec3(1.0)), 1.0);
     }
   )";
   const GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex);
@@ -196,8 +225,6 @@ int main() {
   glUseProgram(program);
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices);
   glEnableVertexAttribArray(0);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices + 2);
-  glEnableVertexAttribArray(1);
   const GLint resolution = glGetUniformLocation(program, "resolution");
   const GLint time = glGetUniformLocation(program, "time");
   const GLint hud_uniform = glGetUniformLocation(program, "hud");
@@ -206,6 +233,8 @@ int main() {
   glBindTexture(GL_TEXTURE_2D, hud_texture);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kWidth, kHeight, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
   std::vector<std::uint32_t> hud_pixels(kWidth * kHeight), hud_rgba(kWidth * kHeight);
   auto font = std::make_unique<hdmi_test::FontRenderer>();
   std::optional<hdmi_test::CpuTimes> previous_cpu;
@@ -215,6 +244,11 @@ int main() {
   auto sample_time = start, fps_time = start;
   for (;;) {
     const auto now = std::chrono::steady_clock::now();
+    if (now - fps_time >= std::chrono::seconds(1)) {
+      fps = measured_frames / std::chrono::duration<double>(now - fps_time).count();
+      measured_frames = 0;
+      fps_time = now;
+    }
     if (now - sample_time >= std::chrono::seconds(1)) {
       const auto current_cpu = hdmi_test::parse_cpu_times(read_file("/proc/stat"));
       cpu = current_cpu && previous_cpu ? hdmi_test::compute_cpu_percent(*previous_cpu, *current_cpu) : 0.0;
@@ -227,13 +261,9 @@ int main() {
         hud_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
       }
       glBindTexture(GL_TEXTURE_2D, hud_texture);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kWidth, kHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, hud_rgba.data());
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RGBA,
+                      GL_UNSIGNED_BYTE, hud_rgba.data());
       sample_time = now;
-    }
-    if (now - fps_time >= std::chrono::seconds(1)) {
-      fps = measured_frames / std::chrono::duration<double>(now - fps_time).count();
-      measured_frames = 0;
-      fps_time = now;
     }
     const float elapsed = std::chrono::duration<float>(now - start).count();
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));

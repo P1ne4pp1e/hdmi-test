@@ -7,5 +7,5 @@
 3. 以 Makefile 连接 `libdrm`，提供 `make`、`make test` 及命令行帮助（R4，Gate 1、2、5）。
 4. 在目标设备执行 HDMI 冒烟测试；当前没有 `/dev/dri` 时，将此条件作为明确的外部环境阻塞记录（R2、R3，Gate 5、6）。
 5. 实现 `/proc` 与 Jetson GPU sysfs 的低频系统指标采样，显示 60 FPS 目标、输出刷新率和资源信息（R5，Gate 2、4、5）。
-6. 将动态背景迁移到 EGL/OpenGL ES fragment shader，并以 Wayland frame callback/EGL swap interval 驱动 60Hz 提交；保留低频 CPU 字体 HUD 更新（R5，Gate 4、5）。
+6. 将动态背景迁移到 EGL/OpenGL ES fragment shader，并以 Wayland frame callback/EGL swap interval 驱动 60Hz 提交；保留低频 CPU 字体 HUD 更新，并验证 HUD 纹理已在 shader 内正确合成（R5，Gate 4、5）。
 7. 分别测量 Idle、Monitor、Stress 以及 YOLO + Monitor/Stress，生成 GPU 竞争基线（R5，Gate 4）。
