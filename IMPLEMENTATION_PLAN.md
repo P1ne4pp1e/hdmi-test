@@ -33,3 +33,9 @@
 **Success Criteria**: 已确认最高有效 nvpmodel 模式；CPU、GPU、EMC 锁定至该模式允许的最高频率；风扇控制持续运行；设置由 systemd 在 Weston/应用启动前应用；存在明确回退命令与温度验证记录。
 **Tests**: `nvpmodel -q` 显示最高模式；`jetson_clocks --show` 显示 static max frequency；`tegrastats` 观察 GPU/CPU 频率、温度与功耗；重启服务后 HDMI 仪表盘仍为 active。
 **Status**: Complete
+
+## Stage 7: 海康工业相机 SDK 集成基线
+**Goal**: 为 MV-CS016-10UC 在 Jetson Orin Nano（Ubuntu 22.04/aarch64）安装官方可用 SDK，并验证设备枚举与首帧采集。
+**Success Criteria**: SDK 架构与系统一致；运行时库和开发头文件可被 C++ 项目发现；相机通过 USB 被枚举；官方示例或最小 C++ 程序能打开设备并采集一帧；安装、权限和回退步骤均被记录。
+**Tests**: 检查 SDK 版本/架构；`ldconfig` 可发现库；USB 设备枚举；SDK 示例或最小采集程序返回有效图像帧。
+**Status**: In Progress
