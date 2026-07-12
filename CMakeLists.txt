@@ -12,6 +12,8 @@ pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client)
 pkg_check_modules(FONT REQUIRED IMPORTED_TARGET freetype2 fontconfig)
 pkg_check_modules(EGL REQUIRED IMPORTED_TARGET egl glesv2 wayland-egl)
 find_package(X11 REQUIRED)
+find_path(HIKSDK_INCLUDE_DIR MvCameraControl.h PATHS /opt/MVS/include REQUIRED)
+find_library(HIKSDK_CAMERA_CONTROL NAMES MvCameraControl PATHS /opt/MVS/lib/aarch64 REQUIRED)
 
 add_library(hdmi_test_pattern src/test_pattern.cpp)
 target_include_directories(hdmi_test_pattern PUBLIC include)
@@ -42,6 +44,11 @@ add_executable(hdmi_egl_stress src/egl_stress.cpp src/font_renderer.cpp generate
 target_include_directories(hdmi_egl_stress PRIVATE generated)
 target_link_libraries(hdmi_egl_stress PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::EGL PkgConfig::FONT)
 target_compile_options(hdmi_egl_stress PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
+
+add_executable(hdmi_hik_camera_probe src/hik_camera_probe.cpp src/hik_camera.cpp)
+target_include_directories(hdmi_hik_camera_probe PRIVATE ${HIKSDK_INCLUDE_DIR})
+target_link_libraries(hdmi_hik_camera_probe PRIVATE ${HIKSDK_CAMERA_CONTROL})
+target_compile_options(hdmi_hik_camera_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 enable_testing()
 add_executable(test_pattern tests/test_pattern.cpp)

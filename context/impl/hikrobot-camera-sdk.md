@@ -26,6 +26,22 @@
 
 SDK 原安装器只修改用户 shell 的 `LD_LIBRARY_PATH`。额外安装 `/etc/ld.so.conf.d/mvs-aarch64.conf` 并执行 `ldconfig`，让后续 systemd 服务与 C++ 程序无需依赖交互式 shell 也能找到 ARM64 SDK 库。
 
+## 参考实现审查：pip-vision-2027（2026-07-13）
+
+参考项目的 ROS 2 包 `src/hikcam` 通过 `tools::camera::HikCamera` 调用 SDK：
+
+1. 参考代码以 `MV_CC_EnumDevices(MV_USB_DEVICE)` 枚举 USB 海康相机；临时探针保留 USB 设备过滤，但向此版 SDK 请求 GigE+USB transport layer，以避免 USB-only 枚举触发 `MV_E_LOAD_LIBRARY`。
+2. 启动时写入 `ExposureTime`、`Gain`、`ReverseX` 和 `ReverseY`，然后 `MV_CC_StartGrabbing`。
+3. 后台 `CameraManager` 线程用 `MV_CC_GetImageBuffer(..., 1000)` 阻塞取帧，SDK 原始 buffer 释放前转换/复制为独立 OpenCV `BGR8` 图像。
+4. `LatestFrameBuffer` 仅保留最新帧，允许下游主动丢弃旧帧，适合实时推理与显示。
+5. CMake 在 `aarch64` 下链接 `/opt/MVS/lib/aarch64` 的 `MvCameraControl`、`MvUsb3vTL`、`MediaProcess`、`MVRender`、`FormatConversion`。
+
+迁移到本项目时应沿用“采集线程 + latest-only 缓冲 + BGR 独立副本”的方式；无桌面 Weston 环境下必须关闭参考项目的 `show_window`，不能依赖 OpenCV `imshow`。参考节点的 `width`/`height` 配置目前没有实际下发到相机，需在新实现中显式处理或删除；其主循环也没有限速，不能直接照搬。
+
+## 临时 SDK 探针（进行中）
+
+经用户授权，已将参考实现中的 SDK 生命周期、USB 枚举、曝光/增益/翻转设置以及“SDK buffer 转独立 BGR 副本”逻辑适配至本项目的 `HikCamera`。`hdmi_hik_camera_probe` 将先枚举相机、再打开默认设备并取一帧；它不依赖 ROS、Qt 或桌面窗口，适合作为 HDMI 项目接入真实画面前的硬件基线。
+
 ## 安装原则
 
 1. 仅安装官方 ARM64 SDK 与其明确声明的依赖。

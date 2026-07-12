@@ -11,6 +11,8 @@ EGL_CPPFLAGS := $(shell pkg-config --cflags egl glesv2 wayland-egl)
 EGL_LDLIBS := $(shell pkg-config --libs egl glesv2 wayland-egl)
 FONT_CPPFLAGS := $(shell pkg-config --cflags freetype2 fontconfig)
 FONT_LDLIBS := $(shell pkg-config --libs freetype2 fontconfig)
+HIK_CPPFLAGS := -I/opt/MVS/include
+HIK_LDLIBS := -L/opt/MVS/lib/aarch64 -Wl,-rpath,/opt/MVS/lib/aarch64 -lMvCameraControl -lpthread
 
 BUILD_DIR := build
 APP := $(BUILD_DIR)/hdmi_test
@@ -22,6 +24,8 @@ WAYLAND_KIOSK := $(BUILD_DIR)/hdmi_wayland_kiosk
 WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp
 EGL_STRESS := $(BUILD_DIR)/hdmi_egl_stress
 EGL_STRESS_SOURCES := src/egl_stress.cpp src/system_metrics.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp
+HIK_CAMERA_PROBE := $(BUILD_DIR)/hdmi_hik_camera_probe
+HIK_CAMERA_PROBE_SOURCES := src/hik_camera_probe.cpp src/hik_camera.cpp
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
@@ -31,7 +35,7 @@ METRICS_TEST_SOURCES := tests/test_system_metrics.cpp src/system_metrics.cpp
 
 .PHONY: all test x11-kiosk clean
 
-all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS)
+all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS) $(HIK_CAMERA_PROBE)
 
 $(APP): $(APP_OBJECTS) | $(BUILD_DIR)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -53,6 +57,9 @@ $(WAYLAND_KIOSK): $(WAYLAND_KIOSK_SOURCES) | $(BUILD_DIR)
 
 $(EGL_STRESS): $(EGL_STRESS_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(EGL_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(EGL_LDLIBS) $(FONT_LDLIBS) -o $@
+
+$(HIK_CAMERA_PROBE): $(HIK_CAMERA_PROBE_SOURCES) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(HIK_CPPFLAGS) $(CXXFLAGS) $^ $(HIK_LDLIBS) -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
