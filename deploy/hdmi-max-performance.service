@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply maximum supported Jetson performance clocks for HDMI workloads
+After=nvpmodel.service
+Before=hdmi-weston-kiosk.service hdmi-weston-smoke.service
+ConditionPathExists=/usr/bin/jetson_clocks
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nvpmodel -m 0
+ExecStart=/usr/bin/jetson_clocks --fan
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

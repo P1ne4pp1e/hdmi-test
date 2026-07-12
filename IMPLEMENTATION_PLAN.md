@@ -20,10 +20,16 @@
 **Goal**: 选择并验证 JetPack NVIDIA 支持的 kiosk/直接输出后端，替代临时 X11 测试路径。
 **Success Criteria**: 不依赖 GNOME 桌面仍可输出测试画面，并记录性能与启动行为。
 **Tests**: 停止图形桌面后的实机启动、重启后自启动、HDMI 人工审查。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 5: GPU 压力渲染与共存基线
 **Goal**: 以 EGL/OpenGL ES shader 生成动态背景，并建立 Idle、Monitor、Stress 与 YOLO 共存的性能基线。
 **Success Criteria**: GPU 背景可由 vsync 驱动稳定输出；HUD 不会成为每帧 CPU 瓶颈；可量化 GPU 压力对推理延迟的影响。
 **Tests**: EGL 客户端能连接 Weston、shader 编译成功、`eglSwapInterval(1)` 生效、60 秒帧时间与资源采样记录。
 **Status**: In Progress
+
+## Stage 6: Jetson 性能模式与热稳定性
+**Goal**: 以当前硬件支持的最高 NVIDIA 电源模式运行显示与后续推理工作负载，并在每次启动后恢复该状态。
+**Success Criteria**: 已确认最高有效 nvpmodel 模式；CPU、GPU、EMC 锁定至该模式允许的最高频率；风扇控制持续运行；设置由 systemd 在 Weston/应用启动前应用；存在明确回退命令与温度验证记录。
+**Tests**: `nvpmodel -q` 显示最高模式；`jetson_clocks --show` 显示 static max frequency；`tegrastats` 观察 GPU/CPU 频率、温度与功耗；重启服务后 HDMI 仪表盘仍为 active。
+**Status**: Complete
