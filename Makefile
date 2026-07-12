@@ -21,7 +21,7 @@ X11_KIOSK_SOURCES := src/x11_kiosk.cpp src/system_metrics.cpp
 WAYLAND_KIOSK := $(BUILD_DIR)/hdmi_wayland_kiosk
 WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp
 EGL_STRESS := $(BUILD_DIR)/hdmi_egl_stress
-EGL_STRESS_SOURCES := src/egl_stress.cpp generated/xdg-shell-protocol.cpp
+EGL_STRESS_SOURCES := src/egl_stress.cpp src/system_metrics.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
@@ -52,7 +52,7 @@ $(WAYLAND_KIOSK): $(WAYLAND_KIOSK_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(FONT_LDLIBS) -o $@
 
 $(EGL_STRESS): $(EGL_STRESS_SOURCES) | $(BUILD_DIR)
-	$(CXX) -Igenerated $(WAYLAND_CPPFLAGS) $(EGL_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(EGL_LDLIBS) -o $@
+	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(EGL_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(EGL_LDLIBS) $(FONT_LDLIBS) -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@

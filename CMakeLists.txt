@@ -38,9 +38,9 @@ target_include_directories(hdmi_wayland_kiosk PRIVATE generated)
 target_link_libraries(hdmi_wayland_kiosk PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::FONT)
 target_compile_options(hdmi_wayland_kiosk PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
 
-add_executable(hdmi_egl_stress src/egl_stress.cpp generated/xdg-shell-protocol.cpp)
+add_executable(hdmi_egl_stress src/egl_stress.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp)
 target_include_directories(hdmi_egl_stress PRIVATE generated)
-target_link_libraries(hdmi_egl_stress PRIVATE PkgConfig::WAYLAND PkgConfig::EGL)
+target_link_libraries(hdmi_egl_stress PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::EGL PkgConfig::FONT)
 target_compile_options(hdmi_egl_stress PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
 
 enable_testing()

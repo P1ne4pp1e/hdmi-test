@@ -1,4 +1,6 @@
 #include "xdg-shell-client-protocol.h"
+#include "hdmi_test/font_renderer.hpp"
+#include "hdmi_test/system_metrics.hpp"
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -9,10 +11,44 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <memory>
+#include <optional>
+#include <vector>
 
 namespace {
 constexpr int kWidth = 800;
 constexpr int kHeight = 480;
+
+std::string read_file(const char* path) {
+  std::ifstream file(path);
+  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
+              double fps, double cpu, double gpu, hdmi_test::MemoryUsage memory,
+              std::uint64_t frame) {
+  std::fill(pixels.begin(), pixels.end(), 0U);
+  constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U;
+  font.draw(pixels.data(), kWidth, kHeight, 24, 31, "HDMI PERFORMANCE LAB", 22, kWhite);
+  font.draw(pixels.data(), kWidth, kHeight, 24, 52, "Native Wayland / NVIDIA DRM", 13, kMuted);
+  font.draw(pixels.data(), kWidth, kHeight, 646, 38, "LIVE  60 Hz", 15, kCyan);
+  char text[80]{};
+  font.draw(pixels.data(), kWidth, kHeight, 40, 112, "FRAME RATE", 13, kMuted);
+  std::snprintf(text, sizeof(text), "%.1f FPS", fps);
+  font.draw(pixels.data(), kWidth, kHeight, 40, 163, text, 34, kWhite);
+  const char* labels[] = {"CPU LOAD", "GPU LOAD", "MEMORY"};
+  for (int index = 0; index < 3; ++index) {
+    const int x = 332 + index * 148;
+    font.draw(pixels.data(), kWidth, kHeight, x, 112, labels[index], 12, kMuted);
+    if (index == 0) std::snprintf(text, sizeof(text), "%.1f%%", cpu);
+    if (index == 1) std::snprintf(text, sizeof(text), "%.1f%%", gpu);
+    if (index == 2) std::snprintf(text, sizeof(text), "%llu/%llu MB", static_cast<unsigned long long>(memory.used_kib/1024), static_cast<unsigned long long>(memory.total_kib/1024));
+    font.draw(pixels.data(), kWidth, kHeight, x, 153, text, index == 2 ? 18 : 24, kWhite);
+  }
+  std::snprintf(text, sizeof(text), "Frame %llu   GPU shader stress background", static_cast<unsigned long long>(frame));
+  font.draw(pixels.data(), kWidth, kHeight, 40, 447, text, 13, kMuted);
+}
 
 struct App {
   wl_display* display = nullptr;
@@ -153,20 +189,62 @@ int main() {
   if (!initialize_egl(app)) return 3;
   const GLuint program = create_program();
   if (program == 0) return 4;
-  constexpr GLfloat vertices[] = {-1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f};
+  constexpr GLfloat vertices[] = {-1.f,-1.f,0.f,1.f, 1.f,-1.f,1.f,1.f,
+                                  -1.f,1.f,0.f,0.f, 1.f,1.f,1.f,0.f};
   const auto start = std::chrono::steady_clock::now();
   glViewport(0, 0, kWidth, kHeight);
   glUseProgram(program);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices);
   glEnableVertexAttribArray(0);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices + 2);
+  glEnableVertexAttribArray(1);
   const GLint resolution = glGetUniformLocation(program, "resolution");
   const GLint time = glGetUniformLocation(program, "time");
+  const GLint hud_uniform = glGetUniformLocation(program, "hud");
+  GLuint hud_texture = 0;
+  glGenTextures(1, &hud_texture);
+  glBindTexture(GL_TEXTURE_2D, hud_texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  std::vector<std::uint32_t> hud_pixels(kWidth * kHeight), hud_rgba(kWidth * kHeight);
+  auto font = std::make_unique<hdmi_test::FontRenderer>();
+  std::optional<hdmi_test::CpuTimes> previous_cpu;
+  hdmi_test::MemoryUsage memory{};
+  double cpu = 0.0, gpu = 0.0, fps = 0.0;
+  std::uint64_t frame = 0, measured_frames = 0;
+  auto sample_time = start, fps_time = start;
   for (;;) {
-    const float elapsed = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+    const auto now = std::chrono::steady_clock::now();
+    if (now - sample_time >= std::chrono::seconds(1)) {
+      const auto current_cpu = hdmi_test::parse_cpu_times(read_file("/proc/stat"));
+      cpu = current_cpu && previous_cpu ? hdmi_test::compute_cpu_percent(*previous_cpu, *current_cpu) : 0.0;
+      previous_cpu = current_cpu;
+      memory = hdmi_test::parse_memory_usage(read_file("/proc/meminfo")).value_or(hdmi_test::MemoryUsage{});
+      gpu = hdmi_test::parse_gpu_load_percent(read_file("/sys/devices/platform/bus@0/17000000.gpu/load")).value_or(0.0);
+      draw_hud(hud_pixels, *font, fps, cpu, gpu, memory, frame);
+      for (std::size_t index = 0; index < hud_pixels.size(); ++index) {
+        const auto rgb = hud_pixels[index];
+        hud_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
+      }
+      glBindTexture(GL_TEXTURE_2D, hud_texture);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kWidth, kHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, hud_rgba.data());
+      sample_time = now;
+    }
+    if (now - fps_time >= std::chrono::seconds(1)) {
+      fps = measured_frames / std::chrono::duration<double>(now - fps_time).count();
+      measured_frames = 0;
+      fps_time = now;
+    }
+    const float elapsed = std::chrono::duration<float>(now - start).count();
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));
     glUniform1f(time, elapsed);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, hud_texture);
+    glUniform1i(hud_uniform, 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     if (!eglSwapBuffers(app.egl_display, app.egl_surface)) return 5;
     wl_display_dispatch_pending(app.display);
+    ++frame;
+    ++measured_frames;
   }
 }

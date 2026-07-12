@@ -173,6 +173,10 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 当前该客户端仅用于 GPU 背景基线验证；下一步把 FreeType HUD 改为低频生成纹理并在 GLES 中叠加，以同时保留可读指标和 GPU 压力背景。
 
+## EGL HUD 合并验证（2026-07-12）
+
+FreeType HUD 已改为每秒生成一次 RGBA 纹理；EGL fragment shader 每帧生成动态背景、玻璃面板并合成 HUD。实机运行 6 秒仅因预期 timeout 退出，验证 GPU 背景与 CPU/GPU/RAM/FPS 面板可以共存。正式服务将切换到该客户端。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。

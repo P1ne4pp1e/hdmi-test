@@ -1,5 +1,5 @@
 [Unit]
-Description=HDMI Weston native Wayland diagnostic display
+Description=HDMI Weston EGL performance dashboard
 After=hdmi-weston-kiosk.service
 Requires=hdmi-weston-kiosk.service
 
@@ -8,7 +8,7 @@ Type=simple
 User=root
 Environment=XDG_RUNTIME_DIR=/run/hdmi-kiosk
 Environment=WAYLAND_DISPLAY=wayland-0
-ExecStart=/home/p1ne4pp1e/screen_test/build/hdmi_wayland_kiosk
+ExecStart=/home/p1ne4pp1e/screen_test/build/hdmi_egl_stress
 Restart=on-failure
 RestartSec=2
 
