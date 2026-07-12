@@ -15,7 +15,7 @@ METRICS_TEST := $(BUILD_DIR)/test_system_metrics
 X11_KIOSK := $(BUILD_DIR)/hdmi_x11_kiosk
 X11_KIOSK_SOURCES := src/x11_kiosk.cpp src/system_metrics.cpp
 WAYLAND_KIOSK := $(BUILD_DIR)/hdmi_wayland_kiosk
-WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp
+WAYLAND_KIOSK_SOURCES := src/wayland_kiosk.cpp src/system_metrics.cpp generated/xdg-shell-protocol.cpp
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
@@ -43,7 +43,7 @@ $(X11_KIOSK): $(X11_KIOSK_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(X11_CPPFLAGS) $(CXXFLAGS) $^ $(X11_LDLIBS) -o $@
 
 $(WAYLAND_KIOSK): $(WAYLAND_KIOSK_SOURCES) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(CXXFLAGS) $^ $(WAYLAND_LDLIBS) -o $@
+	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@

@@ -1,5 +1,5 @@
 [Unit]
-Description=HDMI Weston direct-output EGL fallback client
+Description=HDMI Weston native Wayland diagnostic display
 After=hdmi-weston-kiosk.service
 Requires=hdmi-weston-kiosk.service
 
@@ -8,7 +8,7 @@ Type=simple
 User=root
 Environment=XDG_RUNTIME_DIR=/run/hdmi-kiosk
 Environment=WAYLAND_DISPLAY=wayland-0
-ExecStart=/usr/lib/aarch64-linux-gnu/nvidia/weston-13.0/weston-simple-egl
+ExecStart=/home/p1ne4pp1e/screen_test/build/hdmi_wayland_kiosk
 Restart=on-failure
 RestartSec=2
 

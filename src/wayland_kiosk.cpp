@@ -1,4 +1,5 @@
 #include "hdmi_test/system_metrics.hpp"
+#include "xdg-shell-client-protocol.h"
 
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
@@ -25,8 +26,8 @@ constexpr int kSize = kStride * kHeight;
 
 struct Buffer { wl_buffer* handle = nullptr; std::uint32_t* pixels = nullptr; bool busy = false; };
 struct App {
-  wl_display* display = nullptr; wl_compositor* compositor = nullptr; wl_shell* shell = nullptr; wl_shm* shm = nullptr;
-  wl_surface* surface = nullptr; wl_shell_surface* shell_surface = nullptr; Buffer buffer; std::optional<hdmi_test::CpuTimes> previous_cpu;
+  wl_display* display = nullptr; wl_compositor* compositor = nullptr; xdg_wm_base* wm = nullptr; wl_shm* shm = nullptr;
+  wl_surface* surface = nullptr; xdg_surface* xdg_surface_handle = nullptr; xdg_toplevel* toplevel = nullptr; Buffer buffer; std::optional<hdmi_test::CpuTimes> previous_cpu;
 };
 
 std::string read_file(const char* path) { std::ifstream file(path); return {std::istreambuf_iterator<char>(file), {}}; }
@@ -66,13 +67,16 @@ void draw(App& app, std::uint64_t frame, double cpu, double gpu, hdmi_test::Memo
   char footer[80]{}; std::snprintf(footer,sizeof(footer),"FRAME %llu  FPS 60  GPU DIRECT",static_cast<unsigned long long>(frame)); text(b,30,415,footer,2,color(224,231,255)); text(b,30,445,"SAMPLE INTERVAL 1S  DOUBLE BUFFER READY",2,color(130,160,200));
 }
 void registry_global(void* data, wl_registry* registry, std::uint32_t name, const char* interface, std::uint32_t version) {
-  auto& app=*static_cast<App*>(data); if (std::strcmp(interface,"wl_compositor")==0) app.compositor=static_cast<wl_compositor*>(wl_registry_bind(registry,name,&wl_compositor_interface,std::min(version,static_cast<std::uint32_t>(4)))); else if (std::strcmp(interface,"wl_shell")==0) app.shell=static_cast<wl_shell*>(wl_registry_bind(registry,name,&wl_shell_interface,1)); else if (std::strcmp(interface,"wl_shm")==0) app.shm=static_cast<wl_shm*>(wl_registry_bind(registry,name,&wl_shm_interface,1)); }
+  (void)version;
+  auto& app=*static_cast<App*>(data); if (std::strcmp(interface,"wl_compositor")==0) app.compositor=static_cast<wl_compositor*>(wl_registry_bind(registry,name,&wl_compositor_interface,4)); else if (std::strcmp(interface,"xdg_wm_base")==0) app.wm=static_cast<xdg_wm_base*>(wl_registry_bind(registry,name,&xdg_wm_base_interface,1)); else if (std::strcmp(interface,"wl_shm")==0) app.shm=static_cast<wl_shm*>(wl_registry_bind(registry,name,&wl_shm_interface,1)); }
 void registry_remove(void*, wl_registry*, std::uint32_t) {}
 const wl_registry_listener kRegistryListener{registry_global, registry_remove};
-void shell_ping(void*, wl_shell_surface* surface, std::uint32_t serial) { wl_shell_surface_pong(surface,serial); }
-void shell_configure(void*, wl_shell_surface*, std::uint32_t, int, int) {}
-void shell_popup_done(void*, wl_shell_surface*) {}
-const wl_shell_surface_listener kShellListener{shell_ping,shell_configure,shell_popup_done};
+void wm_ping(void*, xdg_wm_base* wm, std::uint32_t serial) { xdg_wm_base_pong(wm,serial); }
+const xdg_wm_base_listener kWmListener{wm_ping};
+void surface_configure(void*, xdg_surface* surface, std::uint32_t serial) { xdg_surface_ack_configure(surface,serial); }
+const xdg_surface_listener kSurfaceListener{surface_configure};
+void top_configure(void*, xdg_toplevel*, int, int, wl_array*) {} void top_close(void*, xdg_toplevel*) {} void top_bounds(void*, xdg_toplevel*, int, int) {}
+const xdg_toplevel_listener kTopListener{top_configure,top_close,top_bounds};
 void buffer_release(void* data, wl_buffer*) { static_cast<Buffer*>(data)->busy=false; }
 const wl_buffer_listener kBufferListener{buffer_release};
 int create_file() { char path[]="/tmp/hdmi-wayland-XXXXXX"; int fd=mkstemp(path); if(fd>=0) unlink(path); return fd; }
@@ -81,9 +85,9 @@ int create_file() { char path[]="/tmp/hdmi-wayland-XXXXXX"; int fd=mkstemp(path)
 int main() {
   App app{}; app.display=wl_display_connect(nullptr); if(!app.display) return 1;
   wl_registry* registry=wl_display_get_registry(app.display); wl_registry_add_listener(registry,&kRegistryListener,&app); wl_display_roundtrip(app.display);
-  if(!app.compositor||!app.shell||!app.shm) return 2;
+  if(!app.compositor||!app.wm||!app.shm) return 2;
   int fd=create_file(); if(fd<0||ftruncate(fd,kSize)!=0) return 3; app.buffer.pixels=static_cast<std::uint32_t*>(mmap(nullptr,kSize,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0)); if(app.buffer.pixels==MAP_FAILED) return 4;
   wl_shm_pool* pool=wl_shm_create_pool(app.shm,fd,kSize); app.buffer.handle=wl_shm_pool_create_buffer(pool,0,kWidth,kHeight,kStride,WL_SHM_FORMAT_XRGB8888); wl_buffer_add_listener(app.buffer.handle,&kBufferListener,&app.buffer); wl_shm_pool_destroy(pool); close(fd);
-  app.surface=wl_compositor_create_surface(app.compositor); app.shell_surface=wl_shell_get_shell_surface(app.shell,app.surface); wl_shell_surface_add_listener(app.shell_surface,&kShellListener,&app); wl_shell_surface_set_fullscreen(app.shell_surface,WL_SHELL_SURFACE_FULLSCREEN_METHOD_DEFAULT,60,nullptr);
+  xdg_wm_base_add_listener(app.wm,&kWmListener,&app); app.surface=wl_compositor_create_surface(app.compositor); app.xdg_surface_handle=xdg_wm_base_get_xdg_surface(app.wm,app.surface); xdg_surface_add_listener(app.xdg_surface_handle,&kSurfaceListener,&app); app.toplevel=xdg_surface_get_toplevel(app.xdg_surface_handle); xdg_toplevel_add_listener(app.toplevel,&kTopListener,&app); xdg_toplevel_set_fullscreen(app.toplevel,nullptr); wl_surface_commit(app.surface); wl_display_roundtrip(app.display);
   std::uint64_t frame=0; for(;;) { auto cpu=hdmi_test::parse_cpu_times(read_file("/proc/stat")); double cpu_use=cpu&&app.previous_cpu?hdmi_test::compute_cpu_percent(*app.previous_cpu,*cpu):0.0; if(cpu) app.previous_cpu=cpu; auto memory=hdmi_test::parse_memory_usage(read_file("/proc/meminfo")).value_or(hdmi_test::MemoryUsage{}); auto gpu=hdmi_test::parse_gpu_load_percent(read_file("/sys/devices/platform/bus@0/17000000.gpu/load")).value_or(0.0); while(app.buffer.busy) wl_display_dispatch(app.display); draw(app,frame++,cpu_use,gpu,memory); app.buffer.busy=true; wl_surface_attach(app.surface,app.buffer.handle,0,0); wl_surface_damage(app.surface,0,0,kWidth,kHeight); wl_surface_commit(app.surface); wl_display_roundtrip(app.display); sleep(1); }
 }
