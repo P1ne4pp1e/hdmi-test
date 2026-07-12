@@ -98,6 +98,16 @@ Xorg 日志和当前 X RandR 查询给出决定性证据：
 
 `Win+L` 仍能锁屏是当前 X11 原型的预期限制：它由 GNOME 管理，未独占系统显示控制权。系统级切换必须停止 GDM/Xorg 并启动 NVIDIA 兼容的 kiosk compositor；当前用户没有免密 sudo，`sudo -n true` 返回“password is required”，因此该系统级切换尚无法由非交互进程执行。
 
+## GNOME 通知抑制（2026-07-12）
+
+`update-manager` 的 “Software Updater” 窗口会覆盖当前过渡测试画面。已执行：
+
+- 将 GNOME `show-banners` 与 `show-in-lock-screen` 设置为 `false`；
+- 终止当前 `update-manager` 进程并关闭其 X11 窗口；
+- 在 `~/.config/autostart/update-notifier.desktop` 写入 `Hidden=true`，阻止更新通知器下次图形登录自动启动。
+
+这只消除当前 GNOME 过渡方案的干扰，不替代 Stage 4 的无桌面独占显示后端。
+
 ## 构建系统记录
 
 已添加 CMake 配置。当前系统未安装 `cmake`；尝试通过 `sudo apt-get install cmake` 安装时被 sudo 密码提示阻断。现阶段继续以 Makefile 构建并验证，待可用 sudo 凭据后运行安装并执行 CMake 验证。
