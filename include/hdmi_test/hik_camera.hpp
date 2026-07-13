@@ -24,6 +24,7 @@ struct HikCameraFrame {
   int width = 0;
   int height = 0;
   std::uint64_t frame_number = 0;
+  std::uint64_t capture_time_ns = 0;
   std::vector<std::uint8_t> bgr;
 };
 

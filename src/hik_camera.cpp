@@ -4,6 +4,7 @@
 #include <PixelType.h>
 
 #include <cstring>
+#include <chrono>
 #include <sstream>
 
 namespace hdmi_test {
@@ -95,7 +96,25 @@ bool HikCamera::open(std::string& error) {
 }
 
 bool HikCamera::apply_configuration(std::string& error) {
-  int result = MV_CC_SetFloatValue(handle_, "ExposureTime", static_cast<float>(config_.exposure_time_us));
+  // The camera can remain in trigger mode or in a previously persisted frame
+  // rate cap.  Both states make a 165 FPS USB3 camera appear to run at a much
+  // lower rate even though the host capture loop is asynchronous.
+  int result = MV_CC_SetEnumValue(handle_, "TriggerMode", 0);
+  if (result != MV_OK) {
+    error = sdk_error("set TriggerMode", result);
+    return false;
+  }
+  result = MV_CC_SetBoolValue(handle_, "AcquisitionFrameRateEnable", false);
+  if (result != MV_OK) {
+    error = sdk_error("disable AcquisitionFrameRateEnable", result);
+    return false;
+  }
+  result = MV_CC_SetImageNodeNum(handle_, 4);
+  if (result != MV_OK) {
+    error = sdk_error("MV_CC_SetImageNodeNum", result);
+    return false;
+  }
+  result = MV_CC_SetFloatValue(handle_, "ExposureTime", static_cast<float>(config_.exposure_time_us));
   if (result != MV_OK) {
     error = sdk_error("set ExposureTime", result);
     return false;
@@ -150,6 +169,8 @@ bool HikCamera::grab(HikCameraFrame& frame, std::string& error) {
   frame.width = static_cast<int>(raw.stFrameInfo.nWidth);
   frame.height = static_cast<int>(raw.stFrameInfo.nHeight);
   frame.frame_number = raw.stFrameInfo.nFrameNum;
+  frame.capture_time_ns = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
   MV_CC_FreeImageBuffer(handle_, &raw);
   return converted;
 }

@@ -1,6 +1,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "hdmi_test/font_renderer.hpp"
 #include "hdmi_test/hik_camera.hpp"
+#include "hdmi_test/latency_stats.hpp"
 #include "hdmi_test/system_metrics.hpp"
 #include "hdmi_test/yolo_detector.hpp"
 
@@ -29,6 +30,11 @@ constexpr int kHeight = 480;
 std::string read_file(const char* path) {
   std::ifstream file(path);
   return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+std::uint64_t steady_time_ns() {
+  return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 class CameraCapture {
@@ -137,6 +143,7 @@ class YoloPipeline {
       processed_frame = input->frame_number;
       {
         std::lock_guard<std::mutex> lock(mutex_);
+        result.capture_time_ns = input->capture_time_ns;
         timings_ = result.timings;
         latest_ = std::make_shared<hdmi_test::YoloFrame>(std::move(result));
         status_ = "YOLOV8N TENSORRT ONLINE";
@@ -200,7 +207,8 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
               std::uint64_t frame, double camera_fps, const std::string& camera_status,
               const hdmi_test::HikCameraFrame* camera_frame, double yolo_fps,
               const hdmi_test::YoloTimings& yolo_timings, const std::string& yolo_status,
-              const hdmi_test::YoloFrame* yolo_frame) {
+              const hdmi_test::YoloFrame* yolo_frame, double latency_p50,
+              double latency_p95, double latency_p99, std::uint64_t uptime_seconds) {
   std::fill(pixels.begin(), pixels.end(), 0U);
   constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U,
                           kAmber = 0xFFB454U;
@@ -230,8 +238,16 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
   std::snprintf(text, sizeof(text), "%.1f FPS  |  PRE %.1f  INFER %.1f  POST %.1f ms", yolo_fps,
                 yolo_timings.preprocess_ms, yolo_timings.inference_ms, yolo_timings.postprocess_ms);
   font.draw(pixels.data(), kWidth, kHeight, 432, 136, text, 12, kMuted);
-  std::snprintf(text, sizeof(text), "DETECTIONS  %zu", yolo_frame ? yolo_frame->detections.size() : 0U);
+  std::snprintf(text, sizeof(text), "E2E  P50 %.0f  P95 %.0f  P99 %.0f ms", latency_p50, latency_p95, latency_p99);
   font.draw(pixels.data(), kWidth, kHeight, 432, 158, text, 12, kWhite);
+  const auto hours = uptime_seconds / 3600U;
+  const auto minutes = (uptime_seconds / 60U) % 60U;
+  const auto seconds = uptime_seconds % 60U;
+  std::snprintf(text, sizeof(text), "DET %zu  |  UP %02llu:%02llu:%02llu",
+                yolo_frame ? yolo_frame->detections.size() : 0U,
+                static_cast<unsigned long long>(hours), static_cast<unsigned long long>(minutes),
+                static_cast<unsigned long long>(seconds));
+  font.draw(pixels.data(), kWidth, kHeight, 432, 180, text, 12, kMuted);
   draw_detection_labels(pixels, font, yolo_frame);
   const int metric_x[] = {24, 176, 326, 476, 626};
   font.draw(pixels.data(), kWidth, kHeight, metric_x[0], 402, "DISPLAY FPS", 12, kMuted);
@@ -546,6 +562,8 @@ int main() {
   std::uint64_t uploaded_camera_frame = 0;
   int camera_width = 0, camera_height = 0;
   std::uint64_t frame = 0, measured_frames = 0;
+  std::uint64_t presented_yolo_frame = 0;
+  hdmi_test::LatencyWindow end_to_end_latency(512);
   auto sample_time = start, fps_time = start, log_time = start;
   for (;;) {
     const auto now = std::chrono::steady_clock::now();
@@ -554,7 +572,7 @@ int main() {
       measured_frames = 0;
       fps_time = now;
     }
-    if (now - log_time >= std::chrono::seconds(5)) {
+    if (now - log_time >= std::chrono::minutes(1)) {
       std::fprintf(stderr, "hdmi_egl_stress: %.1f FPS\n", fps);
       log_time = now;
     }
@@ -565,9 +583,13 @@ int main() {
       memory = hdmi_test::parse_memory_usage(read_file("/proc/meminfo")).value_or(hdmi_test::MemoryUsage{});
       gpu = hdmi_test::parse_gpu_load_percent(read_file("/sys/devices/platform/bus@0/17000000.gpu/load")).value_or(0.0);
       const auto camera_frame = camera_capture.latest();
+      const auto yolo_frame = yolo_pipeline.latest();
       draw_hud(hud_pixels, *font, fps, cpu, gpu, memory, frame, camera_capture.fps(),
                camera_capture.status(), camera_frame.get(), yolo_pipeline.fps(),
-               yolo_pipeline.timings(), yolo_pipeline.status(), yolo_pipeline.latest().get());
+               yolo_pipeline.timings(), yolo_pipeline.status(), yolo_frame.get(),
+               end_to_end_latency.percentile(0.50), end_to_end_latency.percentile(0.95),
+               end_to_end_latency.percentile(0.99),
+               static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(now - start).count()));
       for (std::size_t index = 0; index < hud_pixels.size(); ++index) {
         const auto rgb = hud_pixels[index];
         hud_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
@@ -602,6 +624,14 @@ int main() {
       uploaded_camera_frame = camera_frame->frame_number;
     }
     const auto yolo_frame = yolo_pipeline.latest();
+    if (yolo_frame && yolo_frame->source_frame_number != presented_yolo_frame &&
+        yolo_frame->capture_time_ns > 0U) {
+      const auto now_ns = steady_time_ns();
+      if (now_ns >= yolo_frame->capture_time_ns) {
+        end_to_end_latency.add(static_cast<double>(now_ns - yolo_frame->capture_time_ns) / 1'000'000.0);
+      }
+      presented_yolo_frame = yolo_frame->source_frame_number;
+    }
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));
     glUniform1f(time, elapsed);
     glActiveTexture(GL_TEXTURE0);

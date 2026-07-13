@@ -31,6 +31,7 @@ HIK_CAMERA_PROBE := $(BUILD_DIR)/hdmi_hik_camera_probe
 HIK_CAMERA_PROBE_SOURCES := src/hik_camera_probe.cpp src/hik_camera.cpp
 YOLO_TEST := $(BUILD_DIR)/test_yolo_postprocess
 YOLO_PREPROCESS_TEST := $(BUILD_DIR)/test_yolo_preprocess
+LATENCY_TEST := $(BUILD_DIR)/test_latency_stats
 YOLO_SOURCES := src/yolo_detector.cpp
 YOLO_CUDA_OBJECT := $(BUILD_DIR)/yolo_preprocess.o
 
@@ -42,7 +43,7 @@ METRICS_TEST_SOURCES := tests/test_system_metrics.cpp src/system_metrics.cpp
 
 .PHONY: all test x11-kiosk clean
 
-all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST)
+all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST)
 
 $(APP): $(APP_OBJECTS) | $(BUILD_DIR)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -74,17 +75,21 @@ $(YOLO_TEST): tests/test_yolo_postprocess.cpp $(YOLO_SOURCES) $(YOLO_CUDA_OBJECT
 $(YOLO_PREPROCESS_TEST): tests/test_yolo_preprocess.cpp $(YOLO_CUDA_OBJECT) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(TENSORRT_CPPFLAGS) $(CXXFLAGS) $^ $(TENSORRT_LDLIBS) -o $@
 
+$(LATENCY_TEST): tests/test_latency_stats.cpp | $(BUILD_DIR)
+	$(CXX) -Iinclude $(CXXFLAGS) $< -o $@
+
 $(YOLO_CUDA_OBJECT): src/yolo_preprocess.cu | $(BUILD_DIR)
 	$(NVCC) -std=c++17 -O2 -Iinclude $(TENSORRT_CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-test: $(TEST) $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST)
+test: $(TEST) $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST)
 	$(TEST)
 	$(METRICS_TEST)
 	$(YOLO_TEST)
 	$(YOLO_PREPROCESS_TEST)
+	$(LATENCY_TEST)
 
 x11-kiosk: $(X11_KIOSK)
 
