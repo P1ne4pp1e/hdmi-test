@@ -1,6 +1,8 @@
 #include "xdg-shell-client-protocol.h"
 #include "hdmi_test/font_renderer.hpp"
+#include "hdmi_test/hik_camera.hpp"
 #include "hdmi_test/system_metrics.hpp"
+#include "hdmi_test/yolo_detector.hpp"
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -8,6 +10,7 @@
 #include <wayland-egl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -15,6 +18,8 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -26,38 +31,192 @@ std::string read_file(const char* path) {
   return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
+class CameraCapture {
+ public:
+  CameraCapture() : worker_([this](std::stop_token stop) { run(stop); }) {}
+  ~CameraCapture() = default;
+
+  std::shared_ptr<const hdmi_test::HikCameraFrame> latest() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return latest_;
+  }
+  double fps() const { return fps_.load(); }
+  std::string status() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return status_;
+  }
+
+ private:
+  void run(std::stop_token stop) {
+    hdmi_test::HikCamera camera;
+    auto last_sample = std::chrono::steady_clock::now();
+    std::uint64_t count = 0;
+    while (!stop.stop_requested()) {
+      std::string error;
+      if (!camera.is_open() && !camera.open(error)) {
+        { std::lock_guard<std::mutex> lock(mutex_); status_ = "CAMERA OFFLINE"; }
+        for (int i = 0; i < 20 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        continue;
+      }
+      hdmi_test::HikCameraFrame frame;
+      if (!camera.grab(frame, error)) {
+        { std::lock_guard<std::mutex> lock(mutex_); status_ = "CAPTURE RETRY"; }
+        camera.close();
+        continue;
+      }
+      auto shared_frame = std::make_shared<hdmi_test::HikCameraFrame>(std::move(frame));
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        latest_ = std::move(shared_frame);
+        status_ = "HIKROBOT USB ONLINE";
+      }
+      ++count;
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_sample >= std::chrono::seconds(1)) {
+        fps_.store(count / std::chrono::duration<double>(now - last_sample).count());
+        count = 0;
+        last_sample = now;
+      }
+    }
+    camera.close();
+  }
+
+  mutable std::mutex mutex_;
+  std::shared_ptr<const hdmi_test::HikCameraFrame> latest_;
+  std::string status_ = "CAMERA STARTING";
+  std::atomic<double> fps_{0.0};
+  std::jthread worker_;
+};
+
+class YoloPipeline {
+ public:
+  explicit YoloPipeline(const CameraCapture& camera) : camera_(camera), worker_([this](std::stop_token stop) { run(stop); }) {}
+
+  std::shared_ptr<const hdmi_test::YoloFrame> latest() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return latest_;
+  }
+  double fps() const { return fps_.load(); }
+  hdmi_test::YoloTimings timings() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return timings_;
+  }
+  std::string status() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return status_;
+  }
+
+ private:
+  void run(std::stop_token stop) {
+    hdmi_test::YoloDetector detector("/home/p1ne4pp1e/screen_test/models/yolov8n.onnx",
+                                     "/home/p1ne4pp1e/screen_test/models/yolov8n_fp16.engine");
+    std::string error;
+    if (!detector.initialize(error)) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      status_ = "YOLO ENGINE ERROR";
+      std::fprintf(stderr, "YOLO initialization: %s\n", error.c_str());
+      return;
+    }
+    { std::lock_guard<std::mutex> lock(mutex_); status_ = "YOLOV8N TENSORRT ONLINE"; }
+    auto last_sample = std::chrono::steady_clock::now();
+    std::uint64_t count = 0;
+    std::uint64_t processed_frame = 0;
+    while (!stop.stop_requested()) {
+      const auto input = camera_.latest();
+      if (!input || input->frame_number == processed_frame) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        continue;
+      }
+      hdmi_test::YoloFrame result;
+      if (!detector.infer(input->bgr.data(), input->width, input->height, input->frame_number, result, error)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        status_ = "YOLO INFERENCE ERROR";
+        std::fprintf(stderr, "YOLO inference: %s\n", error.c_str());
+        return;
+      }
+      processed_frame = input->frame_number;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        timings_ = result.timings;
+        latest_ = std::make_shared<hdmi_test::YoloFrame>(std::move(result));
+        status_ = "YOLOV8N TENSORRT ONLINE";
+      }
+      ++count;
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_sample >= std::chrono::seconds(1)) {
+        fps_.store(count / std::chrono::duration<double>(now - last_sample).count());
+        count = 0;
+        last_sample = now;
+      }
+    }
+  }
+
+  const CameraCapture& camera_;
+  mutable std::mutex mutex_;
+  std::shared_ptr<const hdmi_test::YoloFrame> latest_;
+  hdmi_test::YoloTimings timings_{};
+  std::string status_ = "YOLO ENGINE BUILDING";
+  std::atomic<double> fps_{0.0};
+  std::jthread worker_;
+};
+
 void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
               double fps, double cpu, double gpu, hdmi_test::MemoryUsage memory,
-              std::uint64_t frame) {
+              std::uint64_t frame, double camera_fps, const std::string& camera_status,
+              const hdmi_test::HikCameraFrame* camera_frame, double yolo_fps,
+              const hdmi_test::YoloTimings& yolo_timings, const std::string& yolo_status,
+              const hdmi_test::YoloFrame* yolo_frame) {
   std::fill(pixels.begin(), pixels.end(), 0U);
-  constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U;
+  constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U,
+                          kAmber = 0xFFB454U;
   const auto draw_right = [&font, &pixels](int right, int baseline, const char* value,
                                            int pixel_size, std::uint32_t color) {
-    font.draw(pixels.data(), kWidth, kHeight,
-              right - font.text_width(value, pixel_size), baseline, value, pixel_size, color);
+    font.draw(pixels.data(), kWidth, kHeight, right - font.text_width(value, pixel_size),
+              baseline, value, pixel_size, color);
   };
-  font.draw(pixels.data(), kWidth, kHeight, 24, 31, "HDMI PERFORMANCE LAB", 22, kWhite);
-  font.draw(pixels.data(), kWidth, kHeight, 24, 52, "Native Wayland / NVIDIA DRM", 13, kMuted);
+  font.draw(pixels.data(), kWidth, kHeight, 24, 34, "VISION DISPLAY", 20, kWhite);
+  font.draw(pixels.data(), kWidth, kHeight, 24, 56, "NVIDIA DRM  /  ASYNC CAMERA PIPELINE", 13, kMuted);
   draw_right(764, 38, "LIVE  60 Hz", 15, kCyan);
   char text[80]{};
-  font.draw(pixels.data(), kWidth, kHeight, 40, 112, "FRAME RATE", 13, kMuted);
-  std::snprintf(text, sizeof(text), "%.1f FPS", fps);
-  font.draw(pixels.data(), kWidth, kHeight, 40, 163, text, 34, kWhite);
+  font.draw(pixels.data(), kWidth, kHeight, 32, 92, camera_status.c_str(), 13,
+            camera_frame ? kCyan : kAmber);
+  if (camera_frame) {
+    std::snprintf(text, sizeof(text), "%dx%d  %.1f FPS", camera_frame->width, camera_frame->height, camera_fps);
+    font.draw(pixels.data(), kWidth, kHeight, 32, 112, text, 13, kWhite);
+  } else {
+    const char* offline = "NO CAMERA SIGNAL";
+    font.draw(pixels.data(), kWidth, kHeight, 200 - font.text_width(offline, 22) / 2, 222, offline, 22, kWhite);
+    const char* hint = "USB capture thread is waiting for a device";
+    font.draw(pixels.data(), kWidth, kHeight, 200 - font.text_width(hint, 13) / 2, 248, hint, 13, kMuted);
+  }
+  font.draw(pixels.data(), kWidth, kHeight, 432, 92, "YOLOV8N  /  TENSORRT", 13, kWhite);
+  font.draw(pixels.data(), kWidth, kHeight, 432, 112, yolo_status.c_str(), 12,
+            yolo_frame ? kCyan : kAmber);
+  std::snprintf(text, sizeof(text), "%.1f FPS  |  PRE %.1f  INFER %.1f  POST %.1f ms", yolo_fps,
+                yolo_timings.preprocess_ms, yolo_timings.inference_ms, yolo_timings.postprocess_ms);
+  font.draw(pixels.data(), kWidth, kHeight, 432, 136, text, 12, kMuted);
+  std::snprintf(text, sizeof(text), "DETECTIONS  %zu", yolo_frame ? yolo_frame->detections.size() : 0U);
+  font.draw(pixels.data(), kWidth, kHeight, 432, 158, text, 12, kWhite);
+  const int metric_x[] = {24, 176, 326, 476, 626};
+  font.draw(pixels.data(), kWidth, kHeight, metric_x[0], 402, "DISPLAY FPS", 12, kMuted);
+  std::snprintf(text, sizeof(text), "%.1f", fps);
+  font.draw(pixels.data(), kWidth, kHeight, metric_x[0], 434, text, 24, kWhite);
   const char* labels[] = {"CPU LOAD", "GPU LOAD", "MEMORY"};
-  const int baselines[] = {113, 173, 233};
   const double memory_used_gib = static_cast<double>(memory.used_kib) / (1024.0 * 1024.0);
   const double memory_total_gib = static_cast<double>(memory.total_kib) / (1024.0 * 1024.0);
   for (int index = 0; index < 3; ++index) {
-    font.draw(pixels.data(), kWidth, kHeight, 340, baselines[index], labels[index], 13, kMuted);
+    font.draw(pixels.data(), kWidth, kHeight, metric_x[index + 1], 402, labels[index], 12, kMuted);
     if (index == 0) std::snprintf(text, sizeof(text), "%.1f%%", cpu);
     if (index == 1) std::snprintf(text, sizeof(text), "%.1f%%", gpu);
     if (index == 2) std::snprintf(text, sizeof(text), "%.1f / %.1f GB", memory_used_gib, memory_total_gib);
-    draw_right(760, baselines[index], text, 20, kWhite);
+    font.draw(pixels.data(), kWidth, kHeight, metric_x[index + 1], 434, text, index == 2 ? 15 : 22, kWhite);
   }
+  font.draw(pixels.data(), kWidth, kHeight, metric_x[4], 402, "CAMERA FPS", 12, kMuted);
+  std::snprintf(text, sizeof(text), "%.1f", camera_fps);
+  font.draw(pixels.data(), kWidth, kHeight, metric_x[4], 434, text, 22, kWhite);
   std::snprintf(text, sizeof(text), "FRAME  %llu", static_cast<unsigned long long>(frame));
-  font.draw(pixels.data(), kWidth, kHeight, 40, 312, text, 13, kMuted);
-  font.draw(pixels.data(), kWidth, kHeight, 40, 340, "GPU SHADER STRESS BACKGROUND", 16, kWhite);
-  font.draw(pixels.data(), kWidth, kHeight, 40, 365, "V-SYNC ENABLED  /  HUD UPDATE 1 Hz", 13, kMuted);
+  font.draw(pixels.data(), kWidth, kHeight, 24, 466, text, 12, kMuted);
+  draw_right(764, 466, "ASYNC CAPTURE  /  LATEST FRAME", 12, kMuted);
 }
 
 struct App {
@@ -145,11 +304,23 @@ GLuint create_program() {
     uniform vec2 resolution;
     uniform float time;
     uniform sampler2D hud;
+    uniform sampler2D camera;
+    uniform sampler2D overlay;
+    uniform vec2 cameraSize;
+    uniform vec2 overlaySize;
 
     float rectangle(vec2 point, vec4 bounds) {
       vec2 lower = step(bounds.xy, point);
       vec2 upper = step(point, bounds.xy + bounds.zw);
       return lower.x * lower.y * upper.x * upper.y;
+    }
+
+    float roundedPanel(vec2 point, vec4 bounds, float radius) {
+      vec2 center = bounds.xy + bounds.zw * 0.5;
+      vec2 halfSize = bounds.zw * 0.5;
+      vec2 distance = abs(point - center) - halfSize + radius;
+      float signedDistance = length(max(distance, 0.0)) + min(max(distance.x, distance.y), 0.0) - radius;
+      return 1.0 - smoothstep(0.0, 0.004, signedDistance);
     }
 
     void main() {
@@ -172,21 +343,59 @@ GLuint create_program() {
       // The CPU texture deliberately contains glyph pixels only.  Additive
       // composition keeps its zero-valued background transparent and lets the
       // GPU own the dynamic test canvas on every frame.
-      float header = rectangle(hudUv, vec4(0.025, 0.025, 0.95, 0.115));
-      float fpsCard = rectangle(hudUv, vec4(0.025, 0.175, 0.35, 0.365));
-      float cpuCard = rectangle(hudUv, vec4(0.400, 0.175, 0.575, 0.108));
-      float gpuCard = rectangle(hudUv, vec4(0.400, 0.300, 0.575, 0.108));
-      float ramCard = rectangle(hudUv, vec4(0.400, 0.425, 0.575, 0.108));
-      float footer = rectangle(hudUv, vec4(0.025, 0.575, 0.95, 0.375));
-      float panel = max(max(header, fpsCard), max(max(cpuCard, gpuCard), max(ramCard, footer)));
-      float inset = max(max(rectangle(hudUv, vec4(0.028, 0.028, 0.944, 0.109)),
-                            rectangle(hudUv, vec4(0.028, 0.178, 0.344, 0.359))),
-                        max(max(rectangle(hudUv, vec4(0.403, 0.178, 0.569, 0.102)),
-                                rectangle(hudUv, vec4(0.403, 0.303, 0.569, 0.102))),
-                            max(rectangle(hudUv, vec4(0.403, 0.428, 0.569, 0.102)),
-                                rectangle(hudUv, vec4(0.028, 0.578, 0.944, 0.369)))));
-      base = mix(base, vec3(0.025, 0.070, 0.115), panel * 0.82);
-      base += (panel - inset) * vec3(0.10, 0.26, 0.36);
+      if (cameraSize.x > 0.0 && cameraSize.y > 0.0) {
+        float cameraPanel = rectangle(hudUv, vec4(0.030, 0.200, 0.440, 0.550));
+        vec2 local = (hudUv - vec2(0.030, 0.200)) / vec2(0.440, 0.550);
+        float panelAspect = (0.440 * resolution.x) / (0.550 * resolution.y);
+        float imageAspect = cameraSize.x / cameraSize.y;
+        vec2 sampleUv = local;
+        float visible = 1.0;
+        if (imageAspect > panelAspect) {
+          float contentHeight = panelAspect / imageAspect;
+          visible = step(abs(local.y - 0.5), contentHeight * 0.5);
+          sampleUv.y = (local.y - 0.5) / contentHeight + 0.5;
+        } else {
+          float contentWidth = imageAspect / panelAspect;
+          visible = step(abs(local.x - 0.5), contentWidth * 0.5);
+          sampleUv.x = (local.x - 0.5) / contentWidth + 0.5;
+        }
+        vec3 image = texture2D(camera, vec2(sampleUv.x, 1.0 - sampleUv.y)).bgr;
+        base = mix(base, image, visible * cameraPanel);
+        float cameraBorder = cameraPanel - rectangle(hudUv, vec4(0.033, 0.203, 0.434, 0.544));
+        base += cameraBorder * vec3(0.12, 0.40, 0.48);
+      }
+      if (overlaySize.x > 0.0 && overlaySize.y > 0.0) {
+        float overlayPanel = rectangle(hudUv, vec4(0.530, 0.200, 0.440, 0.550));
+        vec2 local = (hudUv - vec2(0.530, 0.200)) / vec2(0.440, 0.550);
+        float panelAspect = (0.440 * resolution.x) / (0.550 * resolution.y);
+        float imageAspect = overlaySize.x / overlaySize.y;
+        vec2 sampleUv = local;
+        float visible = 1.0;
+        if (imageAspect > panelAspect) {
+          float contentHeight = panelAspect / imageAspect;
+          visible = step(abs(local.y - 0.5), contentHeight * 0.5);
+          sampleUv.y = (local.y - 0.5) / contentHeight + 0.5;
+        } else {
+          float contentWidth = imageAspect / panelAspect;
+          visible = step(abs(local.x - 0.5), contentWidth * 0.5);
+          sampleUv.x = (local.x - 0.5) / contentWidth + 0.5;
+        }
+        vec3 image = texture2D(overlay, vec2(sampleUv.x, 1.0 - sampleUv.y)).bgr;
+        base = mix(base, image, visible * overlayPanel);
+        float overlayBorder = overlayPanel - rectangle(hudUv, vec4(0.533, 0.203, 0.434, 0.544));
+        base += overlayBorder * vec3(0.12, 0.40, 0.48);
+      }
+      // Original background structure: header, preview field, and bottom
+      // metric strip. HUD coordinates are aligned to these fixed dividers.
+      float outer = rectangle(hudUv, vec4(0.012, 0.012, 0.976, 0.976)) -
+                    rectangle(hudUv, vec4(0.015, 0.015, 0.970, 0.970));
+      float topLine = rectangle(hudUv, vec4(0.025, 0.145, 0.950, 0.003));
+      float bottomLine = rectangle(hudUv, vec4(0.025, 0.770, 0.950, 0.003));
+      float metricLines = rectangle(hudUv, vec4(0.198, 0.800, 0.002, 0.120)) +
+                          rectangle(hudUv, vec4(0.385, 0.800, 0.002, 0.120)) +
+                          rectangle(hudUv, vec4(0.572, 0.800, 0.002, 0.120)) +
+                          rectangle(hudUv, vec4(0.760, 0.800, 0.002, 0.120));
+      base += (outer + topLine + bottomLine + metricLines) * vec3(0.12, 0.40, 0.48);
       base += texture2D(hud, hudUv).rgb;
       gl_FragColor = vec4(min(base, vec3(1.0)), 1.0);
     }
@@ -262,6 +471,10 @@ int main() {
   const GLint resolution = glGetUniformLocation(program, "resolution");
   const GLint time = glGetUniformLocation(program, "time");
   const GLint hud_uniform = glGetUniformLocation(program, "hud");
+  const GLint camera_uniform = glGetUniformLocation(program, "camera");
+  const GLint overlay_uniform = glGetUniformLocation(program, "overlay");
+  const GLint camera_size = glGetUniformLocation(program, "cameraSize");
+  const GLint overlay_size = glGetUniformLocation(program, "overlaySize");
   GLuint hud_texture = 0;
   glGenTextures(1, &hud_texture);
   glBindTexture(GL_TEXTURE_2D, hud_texture);
@@ -269,11 +482,31 @@ int main() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kWidth, kHeight, 0, GL_RGBA,
                GL_UNSIGNED_BYTE, nullptr);
+  GLuint camera_texture = 0;
+  glGenTextures(1, &camera_texture);
+  glBindTexture(GL_TEXTURE_2D, camera_texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  GLuint overlay_texture = 0;
+  glGenTextures(1, &overlay_texture);
+  glBindTexture(GL_TEXTURE_2D, overlay_texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   std::vector<std::uint32_t> hud_pixels(kWidth * kHeight), hud_rgba(kWidth * kHeight);
   auto font = std::make_unique<hdmi_test::FontRenderer>();
   std::optional<hdmi_test::CpuTimes> previous_cpu;
   hdmi_test::MemoryUsage memory{};
   double cpu = 0.0, gpu = 0.0, fps = 0.0;
+  CameraCapture camera_capture;
+  YoloPipeline yolo_pipeline(camera_capture);
+  std::uint64_t uploaded_camera_frame = 0;
+  int camera_width = 0, camera_height = 0;
+  std::uint64_t uploaded_yolo_frame = 0;
+  int overlay_width = 0, overlay_height = 0;
   std::uint64_t frame = 0, measured_frames = 0;
   auto sample_time = start, fps_time = start, log_time = start;
   for (;;) {
@@ -293,11 +526,18 @@ int main() {
       previous_cpu = current_cpu;
       memory = hdmi_test::parse_memory_usage(read_file("/proc/meminfo")).value_or(hdmi_test::MemoryUsage{});
       gpu = hdmi_test::parse_gpu_load_percent(read_file("/sys/devices/platform/bus@0/17000000.gpu/load")).value_or(0.0);
-      draw_hud(hud_pixels, *font, fps, cpu, gpu, memory, frame);
+      const auto camera_frame = camera_capture.latest();
+      draw_hud(hud_pixels, *font, fps, cpu, gpu, memory, frame, camera_capture.fps(),
+               camera_capture.status(), camera_frame.get(), yolo_pipeline.fps(),
+               yolo_pipeline.timings(), yolo_pipeline.status(), yolo_pipeline.latest().get());
       for (std::size_t index = 0; index < hud_pixels.size(); ++index) {
         const auto rgb = hud_pixels[index];
         hud_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
       }
+      // Camera uploads use texture unit 1.  HUD must always update its own
+      // texture on unit 0; otherwise the camera preview is overwritten with
+      // glyph pixels and the two layers visibly overlap.
+      glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, hud_texture);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RGBA,
                       GL_UNSIGNED_BYTE, hud_rgba.data());
@@ -307,11 +547,51 @@ int main() {
     // value grows.  All animation terms are periodic over four seconds, so a
     // bounded phase preserves seamless motion indefinitely.
     const float elapsed = std::fmod(std::chrono::duration<float>(now - start).count(), 4.0F);
+    const auto camera_frame = camera_capture.latest();
+    if (camera_frame && camera_frame->frame_number != uploaded_camera_frame) {
+      glActiveTexture(GL_TEXTURE1);
+      glBindTexture(GL_TEXTURE_2D, camera_texture);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+      if (camera_frame->width != camera_width || camera_frame->height != camera_height) {
+        camera_width = camera_frame->width;
+        camera_height = camera_frame->height;
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, camera_width, camera_height, 0, GL_RGB,
+                     GL_UNSIGNED_BYTE, camera_frame->bgr.data());
+      } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, camera_width, camera_height, GL_RGB,
+                        GL_UNSIGNED_BYTE, camera_frame->bgr.data());
+      }
+      uploaded_camera_frame = camera_frame->frame_number;
+    }
+    const auto yolo_frame = yolo_pipeline.latest();
+    if (yolo_frame && yolo_frame->source_frame_number != uploaded_yolo_frame) {
+      glActiveTexture(GL_TEXTURE2);
+      glBindTexture(GL_TEXTURE_2D, overlay_texture);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+      if (yolo_frame->width != overlay_width || yolo_frame->height != overlay_height) {
+        overlay_width = yolo_frame->width;
+        overlay_height = yolo_frame->height;
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, overlay_width, overlay_height, 0, GL_RGB,
+                     GL_UNSIGNED_BYTE, yolo_frame->bgr.data());
+      } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, overlay_width, overlay_height, GL_RGB,
+                        GL_UNSIGNED_BYTE, yolo_frame->bgr.data());
+      }
+      uploaded_yolo_frame = yolo_frame->source_frame_number;
+    }
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));
     glUniform1f(time, elapsed);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, hud_texture);
     glUniform1i(hud_uniform, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, camera_texture);
+    glUniform1i(camera_uniform, 1);
+    glUniform2f(camera_size, static_cast<float>(camera_width), static_cast<float>(camera_height));
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, overlay_texture);
+    glUniform1i(overlay_uniform, 2);
+    glUniform2f(overlay_size, static_cast<float>(overlay_width), static_cast<float>(overlay_height));
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     if (!wait_for_presented_frame(app)) return 6;
     if (!eglSwapBuffers(app.egl_display, app.egl_surface)) return 5;

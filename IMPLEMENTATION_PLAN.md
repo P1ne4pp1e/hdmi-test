@@ -39,3 +39,9 @@
 **Success Criteria**: SDK 架构与系统一致；运行时库和开发头文件可被 C++ 项目发现；相机通过 USB 被枚举；官方示例或最小 C++ 程序能打开设备并采集一帧；安装、权限和回退步骤均被记录。
 **Tests**: 检查 SDK 版本/架构；`ldconfig` 可发现库；USB 设备枚举；SDK 示例或最小采集程序返回有效图像帧。
 **Status**: In Progress
+
+## Stage 8: YOLOv8 TensorRT 双画面验证
+**Goal**: 使用 GPU 上的 TensorRT 运行 YOLOv8n，将最新相机帧异步推理，并在 HDMI 上并列呈现原始画面与检测叠加画面。
+**Success Criteria**: TensorRT 引擎仅在本机首次构建；相机采集、推理、显示三线程互不阻塞；仪表盘显示推理 FPS 及预处理、推理、后处理平均耗时；模型或相机不可用时有明确状态而显示服务保持运行。
+**Tests**: 单元测试覆盖 YOLOv8 输出解码与 NMS；构建通过；启动后确认 TensorRT 使用 GPU、服务日志持续输出推理统计；人工核对两个预览区内容。
+**Status**: In Progress
