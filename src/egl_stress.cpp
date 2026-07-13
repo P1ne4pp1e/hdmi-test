@@ -341,9 +341,9 @@ GLuint create_program() {
     uniform float time;
     uniform sampler2D hud;
     uniform sampler2D camera;
-    uniform sampler2D overlay;
     uniform vec2 cameraSize;
-    uniform vec2 overlaySize;
+    uniform vec4 detectionBoxes[8];
+    uniform int detectionCount;
 
     float rectangle(vec2 point, vec4 bounds) {
       vec2 lower = step(bounds.xy, point);
@@ -400,11 +400,11 @@ GLuint create_program() {
         float cameraBorder = cameraPanel - rectangle(hudUv, vec4(0.033, 0.203, 0.434, 0.544));
         base += cameraBorder * vec3(0.12, 0.40, 0.48);
       }
-      if (overlaySize.x > 0.0 && overlaySize.y > 0.0) {
+      if (cameraSize.x > 0.0 && cameraSize.y > 0.0) {
         float overlayPanel = rectangle(hudUv, vec4(0.530, 0.200, 0.440, 0.550));
         vec2 local = (hudUv - vec2(0.530, 0.200)) / vec2(0.440, 0.550);
         float panelAspect = (0.440 * resolution.x) / (0.550 * resolution.y);
-        float imageAspect = overlaySize.x / overlaySize.y;
+        float imageAspect = cameraSize.x / cameraSize.y;
         vec2 sampleUv = local;
         float visible = 1.0;
         if (imageAspect > panelAspect) {
@@ -416,8 +416,19 @@ GLuint create_program() {
           visible = step(abs(local.x - 0.5), contentWidth * 0.5);
           sampleUv.x = (local.x - 0.5) / contentWidth + 0.5;
         }
-        vec3 image = texture2D(overlay, vec2(sampleUv.x, 1.0 - sampleUv.y)).bgr;
+        vec3 image = texture2D(camera, vec2(sampleUv.x, 1.0 - sampleUv.y)).bgr;
         base = mix(base, image, visible * overlayPanel);
+        float detectionEdge = 0.0;
+        for (int index = 0; index < 8; ++index) {
+          if (index >= detectionCount) break;
+          vec4 box = detectionBoxes[index];
+          float horizontal = step(box.x, sampleUv.x) * step(sampleUv.x, box.z) *
+                             (1.0 - smoothstep(0.0, 0.008, min(abs(sampleUv.y - box.y), abs(sampleUv.y - box.w))));
+          float vertical = step(box.y, sampleUv.y) * step(sampleUv.y, box.w) *
+                           (1.0 - smoothstep(0.0, 0.008, min(abs(sampleUv.x - box.x), abs(sampleUv.x - box.z))));
+          detectionEdge = max(detectionEdge, max(horizontal, vertical));
+        }
+        base = mix(base, vec3(1.0, 0.86, 0.16), detectionEdge * visible * overlayPanel);
         float overlayBorder = overlayPanel - rectangle(hudUv, vec4(0.533, 0.203, 0.434, 0.544));
         base += overlayBorder * vec3(0.12, 0.40, 0.48);
       }
@@ -508,9 +519,9 @@ int main() {
   const GLint time = glGetUniformLocation(program, "time");
   const GLint hud_uniform = glGetUniformLocation(program, "hud");
   const GLint camera_uniform = glGetUniformLocation(program, "camera");
-  const GLint overlay_uniform = glGetUniformLocation(program, "overlay");
   const GLint camera_size = glGetUniformLocation(program, "cameraSize");
-  const GLint overlay_size = glGetUniformLocation(program, "overlaySize");
+  const GLint detection_boxes = glGetUniformLocation(program, "detectionBoxes");
+  const GLint detection_count = glGetUniformLocation(program, "detectionCount");
   GLuint hud_texture = 0;
   glGenTextures(1, &hud_texture);
   glBindTexture(GL_TEXTURE_2D, hud_texture);
@@ -525,13 +536,6 @@ int main() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  GLuint overlay_texture = 0;
-  glGenTextures(1, &overlay_texture);
-  glBindTexture(GL_TEXTURE_2D, overlay_texture);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   std::vector<std::uint32_t> hud_pixels(kWidth * kHeight), hud_rgba(kWidth * kHeight);
   auto font = std::make_unique<hdmi_test::FontRenderer>();
   std::optional<hdmi_test::CpuTimes> previous_cpu;
@@ -541,8 +545,6 @@ int main() {
   YoloPipeline yolo_pipeline(camera_capture);
   std::uint64_t uploaded_camera_frame = 0;
   int camera_width = 0, camera_height = 0;
-  std::uint64_t uploaded_yolo_frame = 0;
-  int overlay_width = 0, overlay_height = 0;
   std::uint64_t frame = 0, measured_frames = 0;
   auto sample_time = start, fps_time = start, log_time = start;
   for (;;) {
@@ -600,21 +602,6 @@ int main() {
       uploaded_camera_frame = camera_frame->frame_number;
     }
     const auto yolo_frame = yolo_pipeline.latest();
-    if (yolo_frame && yolo_frame->source_frame_number != uploaded_yolo_frame) {
-      glActiveTexture(GL_TEXTURE2);
-      glBindTexture(GL_TEXTURE_2D, overlay_texture);
-      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-      if (yolo_frame->width != overlay_width || yolo_frame->height != overlay_height) {
-        overlay_width = yolo_frame->width;
-        overlay_height = yolo_frame->height;
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, overlay_width, overlay_height, 0, GL_RGB,
-                     GL_UNSIGNED_BYTE, yolo_frame->bgr.data());
-      } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, overlay_width, overlay_height, GL_RGB,
-                        GL_UNSIGNED_BYTE, yolo_frame->bgr.data());
-      }
-      uploaded_yolo_frame = yolo_frame->source_frame_number;
-    }
     glUniform2f(resolution, static_cast<float>(kWidth), static_cast<float>(kHeight));
     glUniform1f(time, elapsed);
     glActiveTexture(GL_TEXTURE0);
@@ -624,10 +611,23 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, camera_texture);
     glUniform1i(camera_uniform, 1);
     glUniform2f(camera_size, static_cast<float>(camera_width), static_cast<float>(camera_height));
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, overlay_texture);
-    glUniform1i(overlay_uniform, 2);
-    glUniform2f(overlay_size, static_cast<float>(overlay_width), static_cast<float>(overlay_height));
+    GLfloat boxes[8 * 4]{};
+    int count = 0;
+    if (yolo_frame && yolo_frame->width > 0 && yolo_frame->height > 0) {
+      count = std::min<int>(static_cast<int>(yolo_frame->detections.size()), 8);
+      for (int index = 0; index < count; ++index) {
+        const auto& detection = yolo_frame->detections[static_cast<std::size_t>(index)];
+        const std::size_t offset = static_cast<std::size_t>(index) * 4U;
+        boxes[offset] = detection.left / yolo_frame->width;
+        // OpenGL samples the uploaded BGR texture with flipped T coordinates.
+        // Convert detector image-space Y to that sampling space as well.
+        boxes[offset + 1U] = 1.0F - detection.bottom / yolo_frame->height;
+        boxes[offset + 2U] = detection.right / yolo_frame->width;
+        boxes[offset + 3U] = 1.0F - detection.top / yolo_frame->height;
+      }
+    }
+    glUniform4fv(detection_boxes, 8, boxes);
+    glUniform1i(detection_count, count);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     if (!wait_for_presented_frame(app)) return 6;
     if (!eglSwapBuffers(app.egl_display, app.egl_surface)) return 5;

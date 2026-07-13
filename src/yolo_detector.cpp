@@ -49,39 +49,6 @@ float intersection_over_union(const YoloDetection& first, const YoloDetection& s
   return denominator > 0.0F ? intersection / denominator : 0.0F;
 }
 
-void draw_pixel(std::vector<std::uint8_t>& image, int width, int height, int x, int y,
-                std::array<std::uint8_t, 3> color) {
-  if (x < 0 || y < 0 || x >= width || y >= height) return;
-  const std::size_t offset = (static_cast<std::size_t>(y) * width + x) * 3U;
-  image[offset] = color[0];
-  image[offset + 1] = color[1];
-  image[offset + 2] = color[2];
-}
-
-void draw_box(std::vector<std::uint8_t>& image, int width, int height, const YoloDetection& detection) {
-  constexpr std::array<std::array<std::uint8_t, 3>, 6> kColors{{
-      {44U, 229U, 255U}, {255U, 132U, 48U}, {255U, 92U, 220U},
-      {81U, 255U, 121U}, {224U, 157U, 40U}, {238U, 238U, 238U},
-  }};
-  const auto color = kColors[static_cast<std::size_t>(detection.class_id) % kColors.size()];
-  const int left = std::clamp(static_cast<int>(std::floor(detection.left)), 0, width - 1);
-  const int right = std::clamp(static_cast<int>(std::ceil(detection.right)), 0, width - 1);
-  const int top = std::clamp(static_cast<int>(std::floor(detection.top)), 0, height - 1);
-  const int bottom = std::clamp(static_cast<int>(std::ceil(detection.bottom)), 0, height - 1);
-  // Source frames are reduced to a 352×264 HDMI panel. Eight source pixels
-  // preserve a clearly visible two-pixel edge after that downscale.
-  for (int thickness = 0; thickness < 8; ++thickness) {
-    for (int x = left; x <= right; ++x) {
-      draw_pixel(image, width, height, x, top + thickness, color);
-      draw_pixel(image, width, height, x, bottom - thickness, color);
-    }
-    for (int y = top; y <= bottom; ++y) {
-      draw_pixel(image, width, height, left + thickness, y, color);
-      draw_pixel(image, width, height, right - thickness, y, color);
-    }
-  }
-}
-
 }  // namespace
 
 std::vector<YoloDetection> non_maximum_suppression(std::vector<YoloDetection> detections,
@@ -236,9 +203,7 @@ class YoloDetector::Impl {
     result.width = width;
     result.height = height;
     result.source_frame_number = frame_number;
-    result.bgr.assign(bgr, bgr + static_cast<std::size_t>(width) * height * 3U);
     result.detections = non_maximum_suppression(std::move(candidates), kIouThreshold);
-    for (const auto& detection : result.detections) draw_box(result.bgr, width, height, detection);
     const auto end = std::chrono::steady_clock::now();
     result.timings = {preprocess_ms, inference_ms,
                       std::chrono::duration<double, std::milli>(end - postprocess_begin).count()};

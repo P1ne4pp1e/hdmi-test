@@ -51,3 +51,9 @@
 **Success Criteria**: 预处理由单个 CUDA kernel 完成；仪表盘仍显示 PRE/INFER/POST；与 CPU 基线比较可量化 PRE 时间和 CPU 占用下降；显示保持 60Hz。
 **Tests**: CUDA kernel 的小尺寸 BGR→RGB/CHW 单元测试；`make test` 与 CMake/CTest 通过；实机 `tegrastats` 和仪表盘时间人工核对。
 **Status**: In Progress
+
+## Stage 10: GPU 检测框叠加与端到端延迟
+**Goal**: 不再在 CPU 复制并绘制整张检测图；在 OpenGL ES 着色器中直接叠加检测框，并为下一步 GPU NMS 留出数据通路。
+**Success Criteria**: 右侧预览复用原始相机纹理；检测框由 GPU 绘制、标签继续可读；YOLO 后处理不再包含整帧 BGR 复制；HDMI 保持 60Hz。
+**Tests**: 单元测试覆盖检测框归一化；构建和 CTest 通过；实机核对框、标签和原图同步。
+**Status**: In Progress
