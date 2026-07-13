@@ -22,6 +22,9 @@ int main() {
   const auto gpu = hdmi_test::parse_gpu_load_percent("59\n");
   assert(gpu.has_value());
   assert(*gpu == 59.0);
+  const auto jetson_gpu = hdmi_test::parse_gpu_load_percent("714\n");
+  assert(jetson_gpu.has_value());
+  assert(*jetson_gpu == 71.4);
   assert(!hdmi_test::parse_gpu_load_percent("invalid\n").has_value());
   return 0;
 }

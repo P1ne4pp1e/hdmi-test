@@ -68,10 +68,12 @@ std::optional<double> parse_gpu_load_percent(std::string_view load_contents) {
   try {
     std::size_t consumed = 0;
     const double value = std::stod(std::string(load_contents), &consumed);
-    if (consumed == 0 || !std::isfinite(value) || value < 0.0 || value > 100.0) {
+    if (consumed == 0 || !std::isfinite(value) || value < 0.0 || value > 1000.0) {
       return std::nullopt;
     }
-    return value;
+    // Jetson's devfreq `load` node is expressed in per-mille (0..1000),
+    // while the dashboard displays percentage.
+    return value > 100.0 ? value / 10.0 : value;
   } catch (const std::exception&) {
     return std::nullopt;
   }
