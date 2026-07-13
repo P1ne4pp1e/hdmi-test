@@ -126,10 +126,9 @@ class YoloPipeline {
     { std::lock_guard<std::mutex> lock(mutex_); status_ = "YOLOV8N TENSORRT ONLINE"; }
     auto last_sample = std::chrono::steady_clock::now();
     std::uint64_t count = 0;
-    std::uint64_t processed_frame = 0;
     while (!stop.stop_requested()) {
       const auto input = camera_.latest();
-      if (!input || input->frame_number == processed_frame) {
+      if (!input) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         continue;
       }
@@ -140,13 +139,12 @@ class YoloPipeline {
         std::fprintf(stderr, "YOLO inference: %s\n", error.c_str());
         return;
       }
-      processed_frame = input->frame_number;
       {
         std::lock_guard<std::mutex> lock(mutex_);
         result.capture_time_ns = input->capture_time_ns;
         timings_ = result.timings;
         latest_ = std::make_shared<hdmi_test::YoloFrame>(std::move(result));
-        status_ = "YOLOV8N TENSORRT ONLINE";
+        status_ = "YOLOV8N TENSORRT THROUGHPUT";
       }
       ++count;
       const auto now = std::chrono::steady_clock::now();
