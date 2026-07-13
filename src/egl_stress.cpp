@@ -197,8 +197,8 @@ void draw_detection_labels(std::vector<std::uint32_t>& pixels, hdmi_test::FontRe
     std::snprintf(text, sizeof(text), "%s %.0f%%", coco_label(detection.class_id), detection.confidence * 100.0F);
     // A one-pixel dark shadow stays transparent outside glyphs, preserving
     // the video while making labels readable on bright industrial scenes.
-    font.draw(pixels.data(), kWidth, kHeight, x + 1, y + 1, text, 13, 0x0B1420U);
-    font.draw(pixels.data(), kWidth, kHeight, x, y, text, 13, index == 0 ? kWhite : kCyan);
+    font.draw(pixels.data(), kPanelWidth, kPanelHeight, x + 1, y + 1, text, 13, 0x0B1420U);
+    font.draw(pixels.data(), kPanelWidth, kPanelHeight, x, y, text, 13, index == 0 ? kWhite : kCyan);
   }
 }
 
