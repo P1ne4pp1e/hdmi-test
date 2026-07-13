@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(hdmi_test LANGUAGES CXX)
+project(hdmi_test LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,10 +44,13 @@ target_include_directories(hdmi_wayland_kiosk PRIVATE generated)
 target_link_libraries(hdmi_wayland_kiosk PRIVATE hdmi_test_metrics PkgConfig::WAYLAND PkgConfig::FONT)
 target_compile_options(hdmi_wayland_kiosk PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-error=attributes)
 
-add_library(hdmi_test_yolo src/yolo_detector.cpp)
+add_library(hdmi_test_yolo src/yolo_detector.cpp src/yolo_preprocess.cu)
 target_include_directories(hdmi_test_yolo PUBLIC include ${TENSORRT_INCLUDE_DIR} /usr/local/cuda/targets/aarch64-linux/include)
 target_link_libraries(hdmi_test_yolo PUBLIC ${TENSORRT_LIBRARY} ${TENSORRT_ONNX_LIBRARY} ${CUDART_LIBRARY})
-target_compile_options(hdmi_test_yolo PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(hdmi_test_yolo PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic;-Werror>
+)
+set_target_properties(hdmi_test_yolo PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_ARCHITECTURES 87)
 
 add_executable(hdmi_egl_stress src/egl_stress.cpp src/hik_camera.cpp src/font_renderer.cpp generated/xdg-shell-protocol.cpp)
 target_include_directories(hdmi_egl_stress PRIVATE generated ${HIKSDK_INCLUDE_DIR})
@@ -72,3 +75,7 @@ add_executable(test_yolo_postprocess tests/test_yolo_postprocess.cpp)
 target_link_libraries(test_yolo_postprocess PRIVATE hdmi_test_yolo)
 target_compile_options(test_yolo_postprocess PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_test(NAME test_yolo_postprocess COMMAND test_yolo_postprocess)
+add_executable(test_yolo_preprocess tests/test_yolo_preprocess.cpp)
+target_link_libraries(test_yolo_preprocess PRIVATE hdmi_test_yolo)
+target_compile_options(test_yolo_preprocess PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME test_yolo_preprocess COMMAND test_yolo_preprocess)

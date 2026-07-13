@@ -1,4 +1,5 @@
 #include "hdmi_test/yolo_detector.hpp"
+#include "hdmi_test/yolo_preprocess.hpp"
 
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
@@ -111,6 +112,9 @@ class YoloDetector::Impl {
   Impl(std::string onnx_path, std::string engine_path)
       : onnx_path_(std::move(onnx_path)), engine_path_(std::move(engine_path)) {}
   ~Impl() {
+    if (preprocess_start_) cudaEventDestroy(preprocess_start_);
+    if (inference_start_) cudaEventDestroy(inference_start_);
+    if (inference_end_) cudaEventDestroy(inference_end_);
     if (stream_) cudaStreamDestroy(stream_);
     if (input_) cudaFree(input_);
     for (auto& output : outputs_) if (output.data) cudaFree(output.data);
@@ -137,8 +141,9 @@ class YoloDetector::Impl {
     }
     if (input_name_.empty() || outputs_.empty()) { error = "TensorRT engine has invalid IO tensors"; return false; }
     const std::size_t input_bytes = 3U * kInputSize * kInputSize * sizeof(float);
-    if (cudaMalloc(&input_, input_bytes) != cudaSuccess ||
-        cudaStreamCreate(&stream_) != cudaSuccess) { error = trt_error("allocate TensorRT buffers"); return false; }
+    if (cudaMalloc(&input_, input_bytes) != cudaSuccess || cudaStreamCreate(&stream_) != cudaSuccess ||
+        cudaEventCreate(&preprocess_start_) != cudaSuccess || cudaEventCreate(&inference_start_) != cudaSuccess ||
+        cudaEventCreate(&inference_end_) != cudaSuccess) { error = trt_error("allocate TensorRT buffers"); return false; }
     nvinfer1::Dims input_shape{};
     input_shape.nbDims = 4;
     input_shape.d[0] = 1;
@@ -174,37 +179,33 @@ class YoloDetector::Impl {
 
   bool infer(const std::uint8_t* bgr, int width, int height, std::uint64_t frame_number,
              YoloFrame& result, std::string& error) {
+    error.clear();
     if (!initialized_) { error = "YOLO detector is not initialized"; return false; }
-    const auto preprocess_begin = std::chrono::steady_clock::now();
     const float scale = std::min(static_cast<float>(kInputSize) / width, static_cast<float>(kInputSize) / height);
     const int resized_width = static_cast<int>(std::round(width * scale));
     const int resized_height = static_cast<int>(std::round(height * scale));
     const int padding_x = (kInputSize - resized_width) / 2;
     const int padding_y = (kInputSize - resized_height) / 2;
-    input_host_.assign(3U * kInputSize * kInputSize, 114.0F / 255.0F);
-    for (int y = 0; y < resized_height; ++y) {
-      const int source_y = std::min(static_cast<int>(y / scale), height - 1);
-      for (int x = 0; x < resized_width; ++x) {
-        const int source_x = std::min(static_cast<int>(x / scale), width - 1);
-        const std::size_t source = (static_cast<std::size_t>(source_y) * width + source_x) * 3U;
-        const std::size_t destination = static_cast<std::size_t>(padding_y + y) * kInputSize + padding_x + x;
-        input_host_[destination] = bgr[source + 2U] / 255.0F;
-        input_host_[kInputSize * kInputSize + destination] = bgr[source + 1U] / 255.0F;
-        input_host_[2U * kInputSize * kInputSize + destination] = bgr[source] / 255.0F;
-      }
+    if (cudaEventRecord(preprocess_start_, stream_) != cudaSuccess ||
+        !preprocessor_.run(bgr, width, height, static_cast<float*>(input_), stream_, error) ||
+        cudaEventRecord(inference_start_, stream_) != cudaSuccess) {
+      if (error.empty()) error = trt_error("run GPU preprocessing");
+      return false;
     }
-    if (cudaMemcpyAsync(input_, input_host_.data(), input_host_.size() * sizeof(float), cudaMemcpyHostToDevice, stream_) != cudaSuccess) {
-      error = trt_error("copy YOLO input to GPU"); return false;
-    }
-    const auto inference_begin = std::chrono::steady_clock::now();
     if (!context_->setInputTensorAddress(input_name_.c_str(), input_)) { error = "refresh TensorRT input failed"; return false; }
     for (const auto& output : outputs_) {
       if (!context_->setOutputTensorAddress(output.name.c_str(), output.data)) { error = "refresh TensorRT output failed"; return false; }
     }
-    if (!context_->enqueueV3(stream_) ||
+    if (!context_->enqueueV3(stream_) || cudaEventRecord(inference_end_, stream_) != cudaSuccess ||
         cudaMemcpyAsync(output_host_.data(), output_, output_host_.size() * sizeof(float), cudaMemcpyDeviceToHost, stream_) != cudaSuccess ||
         cudaStreamSynchronize(stream_) != cudaSuccess) {
       error = trt_error("run TensorRT inference");
+      return false;
+    }
+    float preprocess_ms = 0.0F, inference_ms = 0.0F;
+    if (cudaEventElapsedTime(&preprocess_ms, preprocess_start_, inference_start_) != cudaSuccess ||
+        cudaEventElapsedTime(&inference_ms, inference_start_, inference_end_) != cudaSuccess) {
+      error = trt_error("read GPU timing events");
       return false;
     }
     const auto postprocess_begin = std::chrono::steady_clock::now();
@@ -239,8 +240,7 @@ class YoloDetector::Impl {
     result.detections = non_maximum_suppression(std::move(candidates), kIouThreshold);
     for (const auto& detection : result.detections) draw_box(result.bgr, width, height, detection);
     const auto end = std::chrono::steady_clock::now();
-    result.timings = {std::chrono::duration<double, std::milli>(inference_begin - preprocess_begin).count(),
-                      std::chrono::duration<double, std::milli>(postprocess_begin - inference_begin).count(),
+    result.timings = {preprocess_ms, inference_ms,
                       std::chrono::duration<double, std::milli>(end - postprocess_begin).count()};
     return true;
   }
@@ -281,7 +281,10 @@ class YoloDetector::Impl {
   void* output_ = nullptr;
   std::vector<OutputBinding> outputs_;
   cudaStream_t stream_ = nullptr;
-  std::vector<float> input_host_;
+  cudaEvent_t preprocess_start_ = nullptr;
+  cudaEvent_t inference_start_ = nullptr;
+  cudaEvent_t inference_end_ = nullptr;
+  YoloGpuPreprocessor preprocessor_;
   std::vector<float> output_host_ = std::vector<float>(84U * kPredictionCount);
   bool initialized_ = false;
 };

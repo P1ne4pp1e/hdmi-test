@@ -45,3 +45,9 @@
 **Success Criteria**: TensorRT 引擎仅在本机首次构建；相机采集、推理、显示三线程互不阻塞；仪表盘显示推理 FPS 及预处理、推理、后处理平均耗时；模型或相机不可用时有明确状态而显示服务保持运行。
 **Tests**: 单元测试覆盖 YOLOv8 输出解码与 NMS；构建通过；启动后确认 TensorRT 使用 GPU、服务日志持续输出推理统计；人工核对两个预览区内容。
 **Status**: In Progress
+
+## Stage 9: GPU 预处理与低拷贝叠加
+**Goal**: 将相机 BGR 的 letterbox、通道转换、归一化和 CHW 排布从 CPU 移至 CUDA，并减少检测叠加路径的整帧 CPU 拷贝。
+**Success Criteria**: 预处理由单个 CUDA kernel 完成；仪表盘仍显示 PRE/INFER/POST；与 CPU 基线比较可量化 PRE 时间和 CPU 占用下降；显示保持 60Hz。
+**Tests**: CUDA kernel 的小尺寸 BGR→RGB/CHW 单元测试；`make test` 与 CMake/CTest 通过；实机 `tegrastats` 和仪表盘时间人工核对。
+**Status**: In Progress

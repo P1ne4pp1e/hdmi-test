@@ -1,4 +1,5 @@
 CXX := g++
+NVCC := /usr/local/cuda/bin/nvcc
 CPPFLAGS := -Iinclude $(shell pkg-config --cflags libdrm)
 CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -Werror -O2
 LDFLAGS :=
@@ -29,7 +30,9 @@ EGL_STRESS_SOURCES := src/egl_stress.cpp src/hik_camera.cpp src/system_metrics.c
 HIK_CAMERA_PROBE := $(BUILD_DIR)/hdmi_hik_camera_probe
 HIK_CAMERA_PROBE_SOURCES := src/hik_camera_probe.cpp src/hik_camera.cpp
 YOLO_TEST := $(BUILD_DIR)/test_yolo_postprocess
+YOLO_PREPROCESS_TEST := $(BUILD_DIR)/test_yolo_preprocess
 YOLO_SOURCES := src/yolo_detector.cpp
+YOLO_CUDA_OBJECT := $(BUILD_DIR)/yolo_preprocess.o
 
 APP_SOURCES := src/main.cpp src/kms_display.cpp src/test_pattern.cpp
 APP_OBJECTS := $(APP_SOURCES:src/%.cpp=$(BUILD_DIR)/%.o)
@@ -39,7 +42,7 @@ METRICS_TEST_SOURCES := tests/test_system_metrics.cpp src/system_metrics.cpp
 
 .PHONY: all test x11-kiosk clean
 
-all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(YOLO_TEST)
+all: $(APP) $(X11_KIOSK) $(WAYLAND_KIOSK) $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST)
 
 $(APP): $(APP_OBJECTS) | $(BUILD_DIR)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -59,22 +62,29 @@ $(X11_KIOSK): $(X11_KIOSK_SOURCES) | $(BUILD_DIR)
 $(WAYLAND_KIOSK): $(WAYLAND_KIOSK_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) -Igenerated $(WAYLAND_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(FONT_LDLIBS) -o $@
 
-$(EGL_STRESS): $(EGL_STRESS_SOURCES) $(YOLO_SOURCES) | $(BUILD_DIR)
+$(EGL_STRESS): $(EGL_STRESS_SOURCES) $(YOLO_SOURCES) $(YOLO_CUDA_OBJECT) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) -Igenerated $(HIK_CPPFLAGS) $(TENSORRT_CPPFLAGS) $(WAYLAND_CPPFLAGS) $(EGL_CPPFLAGS) $(FONT_CPPFLAGS) $(CXXFLAGS) -Wno-error=attributes $^ $(WAYLAND_LDLIBS) $(EGL_LDLIBS) $(FONT_LDLIBS) $(HIK_LDLIBS) $(TENSORRT_LDLIBS) -o $@
 
 $(HIK_CAMERA_PROBE): $(HIK_CAMERA_PROBE_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(HIK_CPPFLAGS) $(CXXFLAGS) $^ $(HIK_LDLIBS) -o $@
 
-$(YOLO_TEST): tests/test_yolo_postprocess.cpp $(YOLO_SOURCES) | $(BUILD_DIR)
+$(YOLO_TEST): tests/test_yolo_postprocess.cpp $(YOLO_SOURCES) $(YOLO_CUDA_OBJECT) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(TENSORRT_CPPFLAGS) $(CXXFLAGS) $^ $(TENSORRT_LDLIBS) -o $@
+
+$(YOLO_PREPROCESS_TEST): tests/test_yolo_preprocess.cpp $(YOLO_CUDA_OBJECT) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(TENSORRT_CPPFLAGS) $(CXXFLAGS) $^ $(TENSORRT_LDLIBS) -o $@
+
+$(YOLO_CUDA_OBJECT): src/yolo_preprocess.cu | $(BUILD_DIR)
+	$(NVCC) -std=c++17 -O2 -Iinclude $(TENSORRT_CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-test: $(TEST) $(METRICS_TEST) $(YOLO_TEST)
+test: $(TEST) $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST)
 	$(TEST)
 	$(METRICS_TEST)
 	$(YOLO_TEST)
+	$(YOLO_PREPROCESS_TEST)
 
 x11-kiosk: $(X11_KIOSK)
 
