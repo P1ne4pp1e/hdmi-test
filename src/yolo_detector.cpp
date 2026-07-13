@@ -58,12 +58,18 @@ void draw_pixel(std::vector<std::uint8_t>& image, int width, int height, int x, 
 }
 
 void draw_box(std::vector<std::uint8_t>& image, int width, int height, const YoloDetection& detection) {
-  const std::array<std::uint8_t, 3> color{35U, 220U, 100U};
+  constexpr std::array<std::array<std::uint8_t, 3>, 6> kColors{{
+      {44U, 229U, 255U}, {255U, 132U, 48U}, {255U, 92U, 220U},
+      {81U, 255U, 121U}, {224U, 157U, 40U}, {238U, 238U, 238U},
+  }};
+  const auto color = kColors[static_cast<std::size_t>(detection.class_id) % kColors.size()];
   const int left = std::clamp(static_cast<int>(std::floor(detection.left)), 0, width - 1);
   const int right = std::clamp(static_cast<int>(std::ceil(detection.right)), 0, width - 1);
   const int top = std::clamp(static_cast<int>(std::floor(detection.top)), 0, height - 1);
   const int bottom = std::clamp(static_cast<int>(std::ceil(detection.bottom)), 0, height - 1);
-  for (int thickness = 0; thickness < 2; ++thickness) {
+  // Source frames are reduced to a 352×264 HDMI panel. Eight source pixels
+  // preserve a clearly visible two-pixel edge after that downscale.
+  for (int thickness = 0; thickness < 8; ++thickness) {
     for (int x = left; x <= right; ++x) {
       draw_pixel(image, width, height, x, top + thickness, color);
       draw_pixel(image, width, height, x, bottom - thickness, color);

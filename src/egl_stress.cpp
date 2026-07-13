@@ -160,6 +160,41 @@ class YoloPipeline {
   std::jthread worker_;
 };
 
+const char* coco_label(int class_id) {
+  static constexpr const char* kLabels[] = {
+      "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+      "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+      "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+      "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+      "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+      "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet",
+      "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
+      "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+  };
+  return class_id >= 0 && class_id < static_cast<int>(std::size(kLabels)) ? kLabels[class_id] : "object";
+}
+
+void draw_detection_labels(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
+                           const hdmi_test::YoloFrame* yolo_frame) {
+  if (!yolo_frame || yolo_frame->width <= 0 || yolo_frame->height <= 0) return;
+  constexpr int kPanelX = 424, kPanelY = 96, kPanelWidth = 352, kPanelHeight = 264;
+  constexpr std::uint32_t kWhite = 0xF3F7FCU, kCyan = 0x24D6D0U;
+  const std::size_t count = std::min<std::size_t>(yolo_frame->detections.size(), 6U);
+  for (std::size_t index = 0; index < count; ++index) {
+    const auto& detection = yolo_frame->detections[index];
+    const int x = std::clamp(kPanelX + static_cast<int>(detection.left * kPanelWidth / yolo_frame->width),
+                             kPanelX + 4, kPanelX + kPanelWidth - 110);
+    const int y = std::clamp(kPanelY + static_cast<int>(detection.top * kPanelHeight / yolo_frame->height) - 4,
+                             kPanelY + 16, kPanelY + kPanelHeight - 4);
+    char text[48]{};
+    std::snprintf(text, sizeof(text), "%s %.0f%%", coco_label(detection.class_id), detection.confidence * 100.0F);
+    // A one-pixel dark shadow stays transparent outside glyphs, preserving
+    // the video while making labels readable on bright industrial scenes.
+    font.draw(pixels.data(), kWidth, kHeight, x + 1, y + 1, text, 13, 0x0B1420U);
+    font.draw(pixels.data(), kWidth, kHeight, x, y, text, 13, index == 0 ? kWhite : kCyan);
+  }
+}
+
 void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
               double fps, double cpu, double gpu, hdmi_test::MemoryUsage memory,
               std::uint64_t frame, double camera_fps, const std::string& camera_status,
@@ -197,6 +232,7 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
   font.draw(pixels.data(), kWidth, kHeight, 432, 136, text, 12, kMuted);
   std::snprintf(text, sizeof(text), "DETECTIONS  %zu", yolo_frame ? yolo_frame->detections.size() : 0U);
   font.draw(pixels.data(), kWidth, kHeight, 432, 158, text, 12, kWhite);
+  draw_detection_labels(pixels, font, yolo_frame);
   const int metric_x[] = {24, 176, 326, 476, 626};
   font.draw(pixels.data(), kWidth, kHeight, metric_x[0], 402, "DISPLAY FPS", 12, kMuted);
   std::snprintf(text, sizeof(text), "%.1f", fps);
