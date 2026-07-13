@@ -142,6 +142,7 @@ class YoloPipeline {
       {
         std::lock_guard<std::mutex> lock(mutex_);
         result.capture_time_ns = input->capture_time_ns;
+        result.inference_sequence = ++inference_sequence_;
         timings_ = result.timings;
         latest_ = std::make_shared<hdmi_test::YoloFrame>(std::move(result));
         status_ = "YOLOV8N TENSORRT THROUGHPUT";
@@ -162,6 +163,7 @@ class YoloPipeline {
   hdmi_test::YoloTimings timings_{};
   std::string status_ = "YOLO ENGINE BUILDING";
   std::atomic<double> fps_{0.0};
+  std::uint64_t inference_sequence_ = 0;
   std::jthread worker_;
 };
 
@@ -182,15 +184,15 @@ const char* coco_label(int class_id) {
 void draw_detection_labels(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
                            const hdmi_test::YoloFrame* yolo_frame) {
   if (!yolo_frame || yolo_frame->width <= 0 || yolo_frame->height <= 0) return;
-  constexpr int kPanelX = 424, kPanelY = 96, kPanelWidth = 352, kPanelHeight = 264;
+  constexpr int kPanelWidth = 352, kPanelHeight = 264;
   constexpr std::uint32_t kWhite = 0xF3F7FCU, kCyan = 0x24D6D0U;
   const std::size_t count = std::min<std::size_t>(yolo_frame->detections.size(), 6U);
   for (std::size_t index = 0; index < count; ++index) {
     const auto& detection = yolo_frame->detections[index];
-    const int x = std::clamp(kPanelX + static_cast<int>(detection.left * kPanelWidth / yolo_frame->width),
-                             kPanelX + 4, kPanelX + kPanelWidth - 110);
-    const int y = std::clamp(kPanelY + static_cast<int>(detection.top * kPanelHeight / yolo_frame->height) - 4,
-                             kPanelY + 16, kPanelY + kPanelHeight - 4);
+    const int x = std::clamp(static_cast<int>(detection.left * kPanelWidth / yolo_frame->width),
+                             4, kPanelWidth - 110);
+    const int y = std::clamp(static_cast<int>(detection.top * kPanelHeight / yolo_frame->height) - 4,
+                             16, kPanelHeight - 4);
     char text[48]{};
     std::snprintf(text, sizeof(text), "%s %.0f%%", coco_label(detection.class_id), detection.confidence * 100.0F);
     // A one-pixel dark shadow stays transparent outside glyphs, preserving
@@ -246,7 +248,6 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
                 static_cast<unsigned long long>(hours), static_cast<unsigned long long>(minutes),
                 static_cast<unsigned long long>(seconds));
   font.draw(pixels.data(), kWidth, kHeight, 432, 180, text, 12, kMuted);
-  draw_detection_labels(pixels, font, yolo_frame);
   const int metric_x[] = {24, 176, 326, 476, 626};
   font.draw(pixels.data(), kWidth, kHeight, metric_x[0], 402, "DISPLAY FPS", 12, kMuted);
   std::snprintf(text, sizeof(text), "%.1f", fps);
@@ -355,6 +356,7 @@ GLuint create_program() {
     uniform float time;
     uniform sampler2D hud;
     uniform sampler2D camera;
+    uniform sampler2D labels;
     uniform vec2 cameraSize;
     uniform vec4 detectionBoxes[8];
     uniform int detectionCount;
@@ -443,6 +445,7 @@ GLuint create_program() {
           detectionEdge = max(detectionEdge, max(horizontal, vertical));
         }
         base = mix(base, vec3(1.0, 0.86, 0.16), detectionEdge * visible * overlayPanel);
+        base += texture2D(labels, local).rgb * visible * overlayPanel;
         float overlayBorder = overlayPanel - rectangle(hudUv, vec4(0.533, 0.203, 0.434, 0.544));
         base += overlayBorder * vec3(0.12, 0.40, 0.48);
       }
@@ -533,6 +536,7 @@ int main() {
   const GLint time = glGetUniformLocation(program, "time");
   const GLint hud_uniform = glGetUniformLocation(program, "hud");
   const GLint camera_uniform = glGetUniformLocation(program, "camera");
+  const GLint labels_uniform = glGetUniformLocation(program, "labels");
   const GLint camera_size = glGetUniformLocation(program, "cameraSize");
   const GLint detection_boxes = glGetUniformLocation(program, "detectionBoxes");
   const GLint detection_count = glGetUniformLocation(program, "detectionCount");
@@ -550,7 +554,16 @@ int main() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  GLuint labels_texture = 0;
+  glGenTextures(1, &labels_texture);
+  glBindTexture(GL_TEXTURE_2D, labels_texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 352, 264, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   std::vector<std::uint32_t> hud_pixels(kWidth * kHeight), hud_rgba(kWidth * kHeight);
+  std::vector<std::uint32_t> label_pixels(352U * 264U), label_rgba(352U * 264U);
   auto font = std::make_unique<hdmi_test::FontRenderer>();
   std::optional<hdmi_test::CpuTimes> previous_cpu;
   hdmi_test::MemoryUsage memory{};
@@ -561,6 +574,7 @@ int main() {
   int camera_width = 0, camera_height = 0;
   std::uint64_t frame = 0, measured_frames = 0;
   std::uint64_t presented_yolo_frame = 0;
+  std::uint64_t uploaded_label_sequence = 0;
   hdmi_test::LatencyWindow end_to_end_latency(512);
   auto sample_time = start, fps_time = start, log_time = start;
   for (;;) {
@@ -622,6 +636,18 @@ int main() {
       uploaded_camera_frame = camera_frame->frame_number;
     }
     const auto yolo_frame = yolo_pipeline.latest();
+    if (yolo_frame && yolo_frame->inference_sequence != uploaded_label_sequence) {
+      std::fill(label_pixels.begin(), label_pixels.end(), 0U);
+      draw_detection_labels(label_pixels, *font, yolo_frame.get());
+      for (std::size_t index = 0; index < label_pixels.size(); ++index) {
+        const auto rgb = label_pixels[index];
+        label_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
+      }
+      glActiveTexture(GL_TEXTURE2);
+      glBindTexture(GL_TEXTURE_2D, labels_texture);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 352, 264, GL_RGBA, GL_UNSIGNED_BYTE, label_rgba.data());
+      uploaded_label_sequence = yolo_frame->inference_sequence;
+    }
     if (yolo_frame && yolo_frame->source_frame_number != presented_yolo_frame &&
         yolo_frame->capture_time_ns > 0U) {
       const auto now_ns = steady_time_ns();
@@ -639,6 +665,9 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, camera_texture);
     glUniform1i(camera_uniform, 1);
     glUniform2f(camera_size, static_cast<float>(camera_width), static_cast<float>(camera_height));
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, labels_texture);
+    glUniform1i(labels_uniform, 2);
     GLfloat boxes[8 * 4]{};
     int count = 0;
     if (yolo_frame && yolo_frame->width > 0 && yolo_frame->height > 0) {

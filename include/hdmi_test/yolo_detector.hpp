@@ -26,6 +26,7 @@ struct YoloFrame {
   int width = 0;
   int height = 0;
   std::uint64_t source_frame_number = 0;
+  std::uint64_t inference_sequence = 0;
   std::uint64_t capture_time_ns = 0;
   std::vector<std::uint8_t> bgr;
   std::vector<YoloDetection> detections;
