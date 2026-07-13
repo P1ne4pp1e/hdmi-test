@@ -191,7 +191,8 @@ void draw_detection_labels(std::vector<std::uint32_t>& pixels, hdmi_test::FontRe
     const auto& detection = yolo_frame->detections[index];
     const int x = std::clamp(static_cast<int>(detection.left * kPanelWidth / yolo_frame->width),
                              4, kPanelWidth - 110);
-    const int y = std::clamp(static_cast<int>(detection.top * kPanelHeight / yolo_frame->height) - 4,
+    // Keep label coordinates in the same flipped texture space as the GPU box.
+    const int y = std::clamp(static_cast<int>((1.0F - detection.bottom / yolo_frame->height) * kPanelHeight) - 4,
                              16, kPanelHeight - 4);
     char text[48]{};
     std::snprintf(text, sizeof(text), "%s %.0f%%", coco_label(detection.class_id), detection.confidence * 100.0F);
