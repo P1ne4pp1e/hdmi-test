@@ -3,6 +3,7 @@
 #include "hdmi_test/hik_camera.hpp"
 #include "hdmi_test/latency_stats.hpp"
 #include "hdmi_test/system_metrics.hpp"
+#include "hdmi_test/touch_state.hpp"
 #include "hdmi_test/yolo_detector.hpp"
 
 #include <EGL/egl.h>
@@ -209,7 +210,8 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
               const hdmi_test::HikCameraFrame* camera_frame, double yolo_fps,
               const hdmi_test::YoloTimings& yolo_timings, const std::string& yolo_status,
               const hdmi_test::YoloFrame* yolo_frame, double latency_p50,
-              double latency_p95, double latency_p99, std::uint64_t uptime_seconds) {
+              double latency_p95, double latency_p99, std::uint64_t uptime_seconds,
+              std::size_t touch_count) {
   std::fill(pixels.begin(), pixels.end(), 0U);
   constexpr std::uint32_t kWhite = 0xF3F7FCU, kMuted = 0x91A5BCU, kCyan = 0x24D6D0U,
                           kAmber = 0xFFB454U;
@@ -218,10 +220,12 @@ void draw_hud(std::vector<std::uint32_t>& pixels, hdmi_test::FontRenderer& font,
     font.draw(pixels.data(), kWidth, kHeight, right - font.text_width(value, pixel_size),
               baseline, value, pixel_size, color);
   };
+  char text[80]{};
   font.draw(pixels.data(), kWidth, kHeight, 24, 34, "VISION DISPLAY", 20, kWhite);
   font.draw(pixels.data(), kWidth, kHeight, 24, 56, "NVIDIA DRM  /  ASYNC CAMERA PIPELINE", 13, kMuted);
   draw_right(764, 38, "LIVE  60 Hz", 15, kCyan);
-  char text[80]{};
+  std::snprintf(text, sizeof(text), "TOUCH %zu / 5", touch_count);
+  draw_right(764, 58, text, 12, touch_count > 0U ? kCyan : kMuted);
   font.draw(pixels.data(), kWidth, kHeight, 32, 92, camera_status.c_str(), 13,
             camera_frame ? kCyan : kAmber);
   if (camera_frame) {
@@ -275,6 +279,8 @@ struct App {
   wl_display* display = nullptr;
   wl_compositor* compositor = nullptr;
   xdg_wm_base* wm_base = nullptr;
+  wl_seat* seat = nullptr;
+  wl_touch* touch = nullptr;
   wl_surface* surface = nullptr;
   xdg_surface* xdg_surface_handle = nullptr;
   xdg_toplevel* toplevel = nullptr;
@@ -284,7 +290,39 @@ struct App {
   EGLContext egl_context = EGL_NO_CONTEXT;
   wl_callback* frame_callback = nullptr;
   bool frame_presented = true;
+  hdmi_test::TouchState touches;
 };
+
+void touch_down(void* data, wl_touch*, std::uint32_t, std::uint32_t, wl_surface*,
+                std::int32_t id, wl_fixed_t x, wl_fixed_t y) {
+  auto& app = *static_cast<App*>(data);
+  app.touches.down(id, static_cast<float>(wl_fixed_to_double(x)),
+                   static_cast<float>(wl_fixed_to_double(y)));
+}
+void touch_up(void* data, wl_touch*, std::uint32_t, std::uint32_t, std::int32_t id) {
+  static_cast<App*>(data)->touches.up(id);
+}
+void touch_motion(void* data, wl_touch*, std::uint32_t, std::int32_t id, wl_fixed_t x, wl_fixed_t y) {
+  auto& app = *static_cast<App*>(data);
+  app.touches.move(id, static_cast<float>(wl_fixed_to_double(x)),
+                   static_cast<float>(wl_fixed_to_double(y)));
+}
+void touch_frame(void*, wl_touch*) {}
+void touch_cancel(void* data, wl_touch*) { static_cast<App*>(data)->touches.clear(); }
+void touch_shape(void*, wl_touch*, std::int32_t, wl_fixed_t, wl_fixed_t) {}
+void touch_orientation(void*, wl_touch*, std::int32_t, wl_fixed_t) {}
+const wl_touch_listener kTouchListener{touch_down, touch_up, touch_motion, touch_frame,
+                                       touch_cancel, touch_shape, touch_orientation};
+
+void seat_capabilities(void* data, wl_seat* seat, std::uint32_t capabilities) {
+  auto& app = *static_cast<App*>(data);
+  if ((capabilities & WL_SEAT_CAPABILITY_TOUCH) != 0U && app.touch == nullptr) {
+    app.touch = wl_seat_get_touch(seat);
+    wl_touch_add_listener(app.touch, &kTouchListener, &app);
+  }
+}
+void seat_name(void*, wl_seat*, const char*) {}
+const wl_seat_listener kSeatListener{seat_capabilities, seat_name};
 
 void registry_global(void* data, wl_registry* registry, std::uint32_t name,
                      const char* interface, std::uint32_t version) {
@@ -296,6 +334,11 @@ void registry_global(void* data, wl_registry* registry, std::uint32_t name,
   } else if (std::strcmp(interface, "xdg_wm_base") == 0) {
     app.wm_base = static_cast<xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
+  } else if (std::strcmp(interface, "wl_seat") == 0) {
+    app.seat = static_cast<wl_seat*>(
+        wl_registry_bind(registry, name, &wl_seat_interface,
+                         std::min(version, static_cast<std::uint32_t>(5))));
+    wl_seat_add_listener(app.seat, &kSeatListener, &app);
   }
 }
 void registry_remove(void*, wl_registry*, std::uint32_t) {}
@@ -361,6 +404,7 @@ GLuint create_program() {
     uniform vec2 cameraSize;
     uniform vec4 detectionBoxes[8];
     uniform int detectionCount;
+    uniform vec3 touchPoints[5];
 
     float rectangle(vec2 point, vec4 bounds) {
       vec2 lower = step(bounds.xy, point);
@@ -392,6 +436,14 @@ GLuint create_program() {
       vec3 base = mix(vec3(0.02, 0.07, 0.13), vec3(0.03, 0.22, 0.36), wave);
       base += diagonal * vec3(0.01, 0.07, 0.11);
       base += scan * vec3(0.05, 0.65, 0.65);
+      for (int index = 0; index < 5; ++index) {
+        vec3 touch = touchPoints[index];
+        float distanceToTouch = length(uv - touch.xy);
+        float ring = (1.0 - smoothstep(0.018, 0.026, distanceToTouch)) *
+                     smoothstep(0.008, 0.014, distanceToTouch);
+        float center = 1.0 - smoothstep(0.0, 0.008, distanceToTouch);
+        base = mix(base, vec3(0.12, 0.92, 0.84), (ring + center * 0.55) * touch.z);
+      }
 
       // The CPU texture deliberately contains glyph pixels only.  Additive
       // composition keeps its zero-valued background transparent and lets the
@@ -541,6 +593,7 @@ int main() {
   const GLint camera_size = glGetUniformLocation(program, "cameraSize");
   const GLint detection_boxes = glGetUniformLocation(program, "detectionBoxes");
   const GLint detection_count = glGetUniformLocation(program, "detectionCount");
+  const GLint touch_points = glGetUniformLocation(program, "touchPoints");
   GLuint hud_texture = 0;
   glGenTextures(1, &hud_texture);
   glBindTexture(GL_TEXTURE_2D, hud_texture);
@@ -602,7 +655,8 @@ int main() {
                yolo_pipeline.timings(), yolo_pipeline.status(), yolo_frame.get(),
                end_to_end_latency.percentile(0.50), end_to_end_latency.percentile(0.95),
                end_to_end_latency.percentile(0.99),
-               static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(now - start).count()));
+               static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(now - start).count()),
+               app.touches.active_count());
       for (std::size_t index = 0; index < hud_pixels.size(); ++index) {
         const auto rgb = hud_pixels[index];
         hud_rgba[index] = ((rgb >> 16U) & 0xffU) | (rgb & 0xff00U) | ((rgb & 0xffU) << 16U) | 0xff000000U;
@@ -686,6 +740,15 @@ int main() {
     }
     glUniform4fv(detection_boxes, 8, boxes);
     glUniform1i(detection_count, count);
+    GLfloat touch_points_data[hdmi_test::TouchState::kMaxPoints * 3U]{};
+    for (std::size_t index = 0; index < app.touches.points().size(); ++index) {
+      const auto& point = app.touches.points()[index];
+      const std::size_t offset = index * 3U;
+      touch_points_data[offset] = std::clamp(point.x / static_cast<float>(kWidth), 0.0F, 1.0F);
+      touch_points_data[offset + 1U] = 1.0F - std::clamp(point.y / static_cast<float>(kHeight), 0.0F, 1.0F);
+      touch_points_data[offset + 2U] = point.active ? 1.0F : 0.0F;
+    }
+    glUniform3fv(touch_points, static_cast<GLsizei>(hdmi_test::TouchState::kMaxPoints), touch_points_data);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     if (!wait_for_presented_frame(app)) return 6;
     if (!eglSwapBuffers(app.egl_display, app.egl_surface)) return 5;

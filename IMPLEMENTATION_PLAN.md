@@ -63,3 +63,9 @@
 **Success Criteria**: 每个相机帧携带单调时间戳；渲染线程统计采集到呈现前的延迟分位数；服务失败会自动恢复且不会高频写日志；仪表盘展示运行时长与延迟统计。
 **Tests**: 分位数窗口单元测试；构建和 CTest 通过；服务重启后统计重新开始且 HDMI 维持 60Hz。
 **Status**: In Progress
+
+## Stage 12: 五点触控输入验证
+**Goal**: 在 Wayland 原生测试画面中接收并可视化最多五个独立触点。
+**Success Criteria**: Weston `wl_touch` 事件能够驱动屏幕坐标中的实时触点指示器；触点数量明确显示且不会干扰异步相机、YOLO 与 60Hz 渲染。
+**Tests**: 触点状态单元测试覆盖五点上限、移动、抬起和取消；实机五指触摸人工核对。
+**Status**: In Progress
