@@ -23,6 +23,7 @@ HIK_CAMERA_PROBE_SOURCES := src/hik_camera_probe.cpp src/hik_camera.cpp
 YOLO_TEST := $(BUILD_DIR)/test_yolo_postprocess
 YOLO_PREPROCESS_TEST := $(BUILD_DIR)/test_yolo_preprocess
 LATENCY_TEST := $(BUILD_DIR)/test_latency_stats
+TOUCH_TEST := $(BUILD_DIR)/test_touch_state
 YOLO_SOURCES := src/yolo_detector.cpp
 YOLO_CUDA_OBJECT := $(BUILD_DIR)/yolo_preprocess.o
 
@@ -30,7 +31,7 @@ METRICS_TEST_SOURCES := tests/test_system_metrics.cpp src/system_metrics.cpp
 
 .PHONY: all test clean
 
-all: $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST)
+all: $(EGL_STRESS) $(HIK_CAMERA_PROBE) $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST) $(TOUCH_TEST)
 
 $(METRICS_TEST): $(METRICS_TEST_SOURCES) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@
@@ -50,17 +51,21 @@ $(YOLO_PREPROCESS_TEST): tests/test_yolo_preprocess.cpp $(YOLO_CUDA_OBJECT) | $(
 $(LATENCY_TEST): tests/test_latency_stats.cpp | $(BUILD_DIR)
 	$(CXX) -Iinclude $(CXXFLAGS) $< -o $@
 
+$(TOUCH_TEST): tests/test_touch_state.cpp | $(BUILD_DIR)
+	$(CXX) -Iinclude $(CXXFLAGS) $< -o $@
+
 $(YOLO_CUDA_OBJECT): src/yolo_preprocess.cu | $(BUILD_DIR)
 	$(NVCC) -std=c++17 -O2 -Iinclude $(TENSORRT_CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-test: $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST)
+test: $(METRICS_TEST) $(YOLO_TEST) $(YOLO_PREPROCESS_TEST) $(LATENCY_TEST) $(TOUCH_TEST)
 	$(METRICS_TEST)
 	$(YOLO_TEST)
 	$(YOLO_PREPROCESS_TEST)
 	$(LATENCY_TEST)
+	$(TOUCH_TEST)
 
 clean:
 	rm -rf $(BUILD_DIR)
